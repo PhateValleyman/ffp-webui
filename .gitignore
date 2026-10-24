@@ -1,0 +1,11 @@
+# Local build output and release artifacts
+/dist/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/

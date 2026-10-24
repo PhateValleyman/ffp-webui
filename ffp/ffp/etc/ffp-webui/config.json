@@ -1,0 +1,11 @@
+{
+  "listen_addr": "192.168.1.20:8888",
+  "allow_unauthenticated": true,
+  "demo_mode": false,
+  "allowed_roots": ["/"],
+  "package_roots": ["/ffp/pkg", "/ffp/var/tmp/ffp-webui/packages"],
+  "state_dir": "/ffp/var/ffp-webui",
+  "max_upload_bytes": 536870912,
+  "max_package_bytes": 268435456,
+  "operation_timeout_seconds": 300
+}
