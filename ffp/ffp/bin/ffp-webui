@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.9.3'
+WEBUI_VERSION = '0.9.4'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))

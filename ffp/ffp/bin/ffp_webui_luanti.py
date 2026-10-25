@@ -494,8 +494,21 @@ class LuantiManager(object):
                     entry['has_readme'] = any(os.path.isfile(os.path.join(path, candidate)) and not os.path.islink(os.path.join(path, candidate)) for candidate in ('README.md', 'REDADME.md'))
                     if category == 'worlds':
                         entry['gameid'] = self.world_game_id(name)
+                        try:
+                            entry['resolved_gameid'] = self._resolve_game(entry['gameid'])['gameid'] if entry['gameid'] else ''
+                        except ValueError:
+                            entry['resolved_gameid'] = ''
                     elif category == 'games':
-                        entry['title'] = self.game_title(name) or name
+                        try:
+                            game = self._game_entry(name)
+                        except (OSError, ValueError):
+                            game = None
+                        if game:
+                            entry['gameid'] = game['gameid']
+                            entry['aliases'] = game['aliases']
+                            entry['title'] = game['title'] or name
+                        else:
+                            entry['title'] = name
                     elif category == 'mods':
                         entry['title'] = self.mod_title(name) or name
                         entry['enabled'] = self.mod_enabled(name)
@@ -530,11 +543,65 @@ class LuantiManager(object):
         except (OSError, ValueError):
             return ''
 
+    @staticmethod
+    def _normalize_game_id(game_id):
+        if isinstance(game_id, str) and game_id.endswith('_game') and len(game_id) > len('_game'):
+            return game_id[:-len('_game')]
+        return game_id
+
+    def _game_entry(self, folder_name):
+        path = self._item_path('games', folder_name)
+        values = parse_conf(self._read_text(os.path.join(path, 'game.conf'), 1 << 20))
+        game_id = self._normalize_game_id(folder_name)
+        if not valid_name(game_id):
+            raise ValueError('Invalid Luanti game ID derived from its folder name')
+        aliases = []
+        for alias in values.get('aliases', '').split(','):
+            alias = self._normalize_game_id(alias.strip())
+            if valid_name(alias) and alias not in aliases:
+                aliases.append(alias)
+        return {'name': folder_name, 'gameid': game_id,
+                'title': values.get('title') or values.get('name') or '',
+                'aliases': aliases, 'path': path}
+
+    def _available_games(self):
+        root = self._category_root('games')
+        if not os.path.isdir(root):
+            return []
+        try:
+            names = sorted(os.listdir(root), key=lambda value: value.lower())
+        except OSError:
+            return []
+        games = []
+        for name in names:
+            if not valid_name(name):
+                continue
+            try:
+                info = os.lstat(os.path.join(root, name))
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                    continue
+                games.append(self._game_entry(name))
+            except (OSError, ValueError):
+                continue
+        return games
+
+    def _resolve_game(self, game_id):
+        if not valid_name(game_id):
+            raise ValueError('Invalid Luanti game ID')
+        normalized_id = self._normalize_game_id(game_id)
+        games = self._available_games()
+        matches = [game for game in games if game['gameid'] == normalized_id]
+        if not matches:
+            matches = [game for game in games if normalized_id in game['aliases']]
+        if len(matches) > 1:
+            raise ValueError('Luanti game ID is ambiguous in the configured games path')
+        if not matches:
+            raise ValueError('Luanti game ID is not installed in the configured games path')
+        return matches[0]
+
     def game_title(self, game_id):
         try:
-            path = self._item_path('games', game_id)
-            values = parse_conf(self._read_text(os.path.join(path, 'game.conf'), 1 << 20))
-            return values.get('title') or values.get('name') or ''
+            return self._resolve_game(game_id)['title']
         except (OSError, ValueError):
             return ''
 
@@ -575,7 +642,8 @@ class LuantiManager(object):
             raise ValueError('Stop the Luanti server before creating or changing worlds')
         if not valid_name(name) or not valid_name(game_id):
             raise ValueError('World and game names may contain only letters, digits, dot, underscore and hyphen')
-        game_path = self._item_path('games', game_id)
+        game = self._resolve_game(game_id)
+        game_id = game['gameid']
         root = self._category_root('worlds', create=True)
         target = os.path.join(root, name)
         if os.path.lexists(target):
@@ -599,7 +667,8 @@ class LuantiManager(object):
     def set_world_game(self, world_name, game_id):
         if self.is_running():
             raise ValueError('Stop the Luanti server before changing a world game')
-        self._item_path('games', game_id)
+        game = self._resolve_game(game_id)
+        game_id = game['gameid']
         _world, conf_path, text = self._world_conf(world_name)
         lines = []
         for line in text.splitlines():
@@ -1204,7 +1273,7 @@ class LuantiManager(object):
             game_id = self.world_game_id(world_name)
             if not game_id:
                 raise ValueError('Selected world has no valid gameid in world.mt')
-            self._item_path('games', game_id)
+            self._resolve_game(game_id)
             config_path = self.validate_path(self.preferences['config_path'], allow_missing=True)
             if not os.path.exists(config_path):
                 self.save_config('', self.preferences['port'], self.preferences['bind_address'])

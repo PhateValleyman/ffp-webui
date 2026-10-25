@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.4 — 2026-10-25
+
+- Luanti game IDs now follow engine rules: the folder name is used with a trailing `_game` removed (so `minetest_game` is `minetest`); legacy IDs from `game.conf` `aliases` resolve safely. A free-form `id` key is not treated as an ID.
+- Game listing and world selectors expose canonical IDs. World creation and game changes save canonical IDs, and server start resolves legacy aliases and fails closed for missing or ambiguous games.
+- Added regressions for the reported NAS folders/worlds, aliases, `_game` normalization and ambiguous matches. The NAS was not changed or tested.
+
 ## 0.9.3 — 2026-10-25
 
 - Opraven výpis modů: jejich stav se čte z `load_mod_<název>` ve `world.mt` vybraného světa; bez záznamu je nový mod označen jako vypnutý a bez vybraného světa jako neznámý.

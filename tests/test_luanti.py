@@ -33,7 +33,9 @@ class LuantiManagerTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
         for key in ('games_path', 'worlds_path', 'mods_path', 'skins_path'):
             self.paths[key].mkdir(parents=True, exist_ok=True)
-        (self.paths['games_path'] / 'default').mkdir()
+        default_game = self.paths['games_path'] / 'default'
+        default_game.mkdir()
+        (default_game / 'game.conf').write_text('title = Default Game\n', encoding='utf-8')
         self.manager = LuantiManager(
             state_root=str(self.root / 'state'),
             preferences_path=str(self.root / 'etc' / 'luanti.json'),
@@ -272,7 +274,68 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertIsNone(self.manager.mod_enabled('example'))
         self.assertIsNone(self.manager.list_category('mods')[0]['enabled'])
 
+    def test_reported_nas_layout_uses_minetest_game_folder_for_minetest_id(self):
+        default_game = self.paths['games_path'] / 'default'
+        (default_game / 'game.conf').unlink()
+        default_game.rmdir()
+        for folder, title in (('devtest', 'Development Test'), ('minetest_game', 'Minetest Game')):
+            game_path = self.paths['games_path'] / folder
+            game_path.mkdir()
+            (game_path / 'game.conf').write_text('title = %s\n' % title, encoding='utf-8')
+
+        for name, game_id in (('p', 'minetest'), ('server', 'minetest'), ('t', 'extra_ordinance'),
+                              ('world', 'minetest'), ('worldmods', '')):
+            world_path = self.paths['worlds_path'] / name
+            world_path.mkdir()
+            text = 'world_name = %s\n' % name
+            if game_id:
+                text += 'gameid = %s\n' % game_id
+            (world_path / 'world.mt').write_text(text, encoding='utf-8')
+
+        games = {item['name']: item.get('gameid') for item in self.manager.list_category('games')}
+        self.assertEqual(games['devtest'], 'devtest')
+        self.assertEqual(games['minetest_game'], 'minetest')
+        worlds = {item['name']: item for item in self.manager.list_category('worlds')}
+        for name in ('p', 'server', 'world'):
+            self.assertEqual(worlds[name]['gameid'], 'minetest')
+            self.assertEqual(worlds[name]['resolved_gameid'], 'minetest')
+        self.assertEqual(worlds['t']['gameid'], 'extra_ordinance')
+        self.assertEqual(worlds['t']['resolved_gameid'], '')
+        self.assertEqual(worlds['worldmods']['gameid'], '')
+        self.assertEqual(worlds['worldmods']['resolved_gameid'], '')
+        self.assertEqual(self.manager._resolve_game('minetest')['name'], 'minetest_game')
+        with self.assertRaisesRegex(ValueError, 'not installed'):
+            self.manager._resolve_game('extra_ordinance')
+
+    def test_game_alias_and_id_field_handling_canonicalize_worlds(self):
+        game_path = self.paths['games_path'] / 'renamed_game'
+        game_path.mkdir()
+        (game_path / 'game.conf').write_text(
+            'title = Renamed Game\nid = ignored_custom_id\naliases = old_name, old_game\n',
+            encoding='utf-8')
+        games = {item['name']: item for item in self.manager.list_category('games')}
+        self.assertEqual(games['renamed_game']['gameid'], 'renamed')
+        self.assertEqual(games['renamed_game']['aliases'], ['old_name', 'old'])
+        self.assertEqual(self.manager._resolve_game('old_name')['name'], 'renamed_game')
+        created = self.manager.create_world('renamed-world', 'renamed_game')
+        self.assertEqual(created['gameid'], 'renamed')
+        changed = self.manager.set_world_game('main', 'old_name')
+        self.assertEqual(changed['gameid'], 'renamed')
+        self.assertEqual(self.manager.world_game_id('main'), 'renamed')
+
+    def test_duplicate_normalized_game_ids_fail_closed(self):
+        for folder in ('collision', 'collision_game'):
+            game_path = self.paths['games_path'] / folder
+            game_path.mkdir()
+            (game_path / 'game.conf').write_text('title = Collision\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'ambiguous'):
+            self.manager._resolve_game('collision')
+
     def test_start_passes_root_identity_to_the_luanti_process(self):
+        minetest_game = self.paths['games_path'] / 'minetest_game'
+        minetest_game.mkdir()
+        (minetest_game / 'game.conf').write_text('title = Minetest Game\n', encoding='utf-8')
+        (self.paths['worlds_path'] / 'main' / 'world.mt').write_text('gameid = minetest\n', encoding='utf-8')
         binary = self.paths['binary_path']
         binary.write_text('#!/bin/sh\nexit 0\n')
         binary.chmod(0o755)
@@ -289,6 +352,9 @@ class LuantiManagerTests(unittest.TestCase):
                  mock.patch('ffp_webui_luanti.os.setuid') as setuid:
                 popen.call_args.kwargs['preexec_fn']()
         self.assertTrue(result['running'])
+        self.assertEqual(result['world'], 'main')
+        self.assertEqual(popen.call_args.args[0][popen.call_args.args[0].index('--world') + 1],
+                         str(self.paths['worlds_path'] / 'main'))
         setgroups.assert_called_once_with([0])
         setgid.assert_called_once_with(0)
         setuid.assert_called_once_with(0)

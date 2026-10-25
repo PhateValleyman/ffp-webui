@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.9.3';
+const FRONTEND_VERSION = '0.9.4';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -296,7 +296,7 @@ async function loadLuanti() {
     for (const world of (data.worlds || [])) worldSelect.add(new Option(`${world.name}${world.gameid ? ` · ${world.gameid}` : ''}`, world.name));
     worldSelect.value = selectedWorld;
     const gameSelect = $('#luanti-new-world-game'); gameSelect.replaceChildren();
-    for (const game of (data.games || [])) gameSelect.add(new Option(`${game.title || game.name} (${game.name})`, game.name));
+    for (const game of (data.games || []).filter(item => item.gameid)) gameSelect.add(new Option(`${game.title || game.gameid} (${game.gameid})`, game.gameid));
     const frozen = demo || running;
     for (const selector of ['#luanti-world-form button', '#luanti-import-form button', '#luanti-player-form button']) $(selector).disabled = frozen;
     worldSelect.disabled = demo || running;
@@ -333,8 +333,8 @@ function renderLuantiItems(kind, items) {
       select.type = 'button'; select.disabled = item.name === luantiSnapshot?.paths?.selected_world || luantiSnapshot?.status?.running || luantiSnapshot?.demo;
       select.addEventListener('click', () => chooseLuantiWorld(item.name)); actions.append(select);
       const game = node('select'); game.setAttribute('aria-label', `Hra pro svět ${item.name}`);
-      for (const gameItem of (luantiSnapshot?.games || [])) game.add(new Option(`${gameItem.name}`, gameItem.name));
-      game.value = item.gameid || '';
+      for (const gameItem of (luantiSnapshot?.games || []).filter(candidate => candidate.gameid)) game.add(new Option(`${gameItem.title || gameItem.gameid} (${gameItem.gameid})`, gameItem.gameid));
+      game.value = item.resolved_gameid || item.gameid || '';
       const setGame = node('button', 'Nastavit hru', 'button button-quiet'); setGame.type = 'button'; setGame.disabled = luantiSnapshot?.status?.running || luantiSnapshot?.demo;
       setGame.addEventListener('click', () => setLuantiWorldGame(item.name, game.value)); actions.append(game, setGame);
     }
