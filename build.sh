@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
-VERSION=${VERSION:-0.9.4}
+VERSION=${VERSION:-0.9.5}
 
 case "$VERSION" in
     ''|*[!0-9A-Za-z._-]*)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.5 — 2026-10-25
+
+- Luanti accepts `/ffp/home/root/.minetest` as `user_path` only when games, worlds, mods and skins are its immediate matching subdirectories; unrelated overlaps, nested paths and symlink aliases remain rejected.
+- Added regression coverage for the supported root layout and rejected nested/symlinked layouts. The NAS was not changed or tested.
+
 ## 0.9.4 — 2026-10-25
 
 - Luanti game IDs now follow engine rules: the folder name is used with a trailing `_game` removed (so `minetest_game` is `minetest`); legacy IDs from `game.conf` `aliases` resolve safely. A free-form `id` key is not treated as an ID.

@@ -115,6 +115,61 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertEqual(reloaded.preferences['selected_world'], '')
         self.assertEqual(reloaded.preferences['run_as_user'], '')
 
+    def test_minetest_user_root_can_contain_immediate_category_directories(self):
+        user_root = self.root / '.minetest'
+        user_root.mkdir()
+        values = {
+            'games_path': str(user_root / 'games'),
+            'worlds_path': str(user_root / 'worlds'),
+            'mods_path': str(user_root / 'mods'),
+            'skins_path': str(user_root / 'skins'),
+            'user_path': str(user_root),
+        }
+        for field in ('games_path', 'worlds_path', 'mods_path', 'skins_path'):
+            Path(values[field]).mkdir()
+        result = self.manager.update_paths_only(values)
+        self.assertEqual({key: result[key] for key in values}, values)
+        self.assertEqual(Path(result['user_path']).name, '.minetest')
+
+    def test_minetest_user_root_exception_rejects_nested_category_path(self):
+        user_root = self.root / '.minetest'
+        values = {
+            'games_path': str(user_root / 'games'),
+            'worlds_path': str(user_root / 'worlds' / 'nested'),
+            'mods_path': str(user_root / 'mods'),
+            'skins_path': str(user_root / 'skins'),
+            'user_path': str(user_root),
+        }
+        with self.assertRaisesRegex(ValueError, 'data paths may not overlap'):
+            self.manager.update_paths_only(values)
+
+    def test_minetest_user_root_exception_rejects_symlinked_category_alias(self):
+        user_root = self.root / '.minetest'
+        user_root.mkdir()
+        (user_root / 'games').mkdir()
+        (user_root / 'mods').symlink_to(user_root / 'games', target_is_directory=True)
+        values = {
+            'games_path': str(user_root / 'games'),
+            'worlds_path': str(user_root / 'worlds'),
+            'mods_path': str(user_root / 'mods'),
+            'skins_path': str(user_root / 'skins'),
+            'user_path': str(user_root),
+        }
+        with self.assertRaisesRegex(ValueError, 'data paths may not overlap'):
+            self.manager.update_paths_only(values)
+
+    def test_unrelated_user_root_cannot_contain_category_directories(self):
+        user_root = self.root / 'minetest-data'
+        values = {
+            'games_path': str(user_root / 'games'),
+            'worlds_path': str(user_root / 'worlds'),
+            'mods_path': str(user_root / 'mods'),
+            'skins_path': str(user_root / 'skins'),
+            'user_path': str(user_root),
+        }
+        with self.assertRaisesRegex(ValueError, 'data paths may not overlap'):
+            self.manager.update_paths_only(values)
+
     def test_failed_path_save_keeps_memory_and_disk_preferences_unchanged(self):
         old_preferences = dict(self.manager.preferences)
         preferences_file = Path(self.manager.preferences_path)

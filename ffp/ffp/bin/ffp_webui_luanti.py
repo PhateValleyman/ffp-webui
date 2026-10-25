@@ -198,6 +198,7 @@ class LuantiManager(object):
             raw = values.get(field, result[field])
             result[field] = self.validate_path(raw, allow_missing=True, allow_root=False)
         data_roots = [(field, os.path.realpath(result[field])) for field in ('games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path')]
+        allow_user_root = self._supports_minetest_user_root(result)
         for index, (field, path) in enumerate(data_roots):
             for other_field, other in data_roots[index + 1:]:
                 try:
@@ -205,8 +206,27 @@ class LuantiManager(object):
                 except ValueError:
                     continue
                 if common == path or common == other:
+                    if allow_user_root and 'user_path' in (field, other_field):
+                        continue
                     raise ValueError('Luanti data paths may not overlap: %s and %s' % (field, other_field))
         return result
+
+    def _supports_minetest_user_root(self, paths):
+        """Allow only the established .minetest root with direct category children."""
+        user_path = os.path.normpath(paths['user_path'])
+        resolved_user_path = os.path.realpath(user_path)
+        if os.path.basename(user_path) != '.minetest' or os.path.basename(resolved_user_path) != '.minetest':
+            return False
+        for field, child in (('games_path', 'games'), ('worlds_path', 'worlds'),
+                             ('mods_path', 'mods'), ('skins_path', 'skins')):
+            category_path = os.path.normpath(paths[field])
+            resolved_category_path = os.path.realpath(category_path)
+            if category_path != os.path.join(user_path, child):
+                return False
+            if (os.path.dirname(resolved_category_path) != resolved_user_path or
+                    os.path.basename(resolved_category_path) != child):
+                return False
+        return True
 
     def _validate_preferences(self, values):
         result = self._validate_paths(values, self.preferences)
