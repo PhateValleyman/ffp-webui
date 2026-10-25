@@ -111,12 +111,33 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("if (!needsVersion) $('#zypkg-action-version').value = ''", self.js)
         self.assertIn("const version = ['install', 'uninstall'].includes(action)", self.js)
 
+    def test_button_confirmation_dialog_replaces_all_typed_action_gates(self):
+        self.assertEqual(len(re.findall(r"\bconfirmGuardedAction\(", self.js)) - 1, 42)
+        self.assertNotRegex(self.js, r"\b(?:window\.)?confirm\s*\(")
+        self.assertNotRegex(self.js, r"if\s*\(\s*prompt\s*\(")
+        self.assertIn("actionConfirmDialog.showModal()", self.js)
+        self.assertIn("actionConfirmDialog.close('confirm')", self.js)
+        self.assertIn("actionConfirmDialog.close('cancel')", self.js)
+        self.assertIn("actionConfirmCancel.focus()", self.js)
+        self.assertIn("event.key === 'Enter' && event.target === actionConfirmDialog", self.js)
+        self.assertIn("actionConfirmDialog.returnValue === 'confirm'", self.js)
+        self.assertIn("confirm: confirmText", self.js)
+        dialog_start = self.html.index('<dialog id="action-confirm-dialog"')
+        dialog_end = self.html.index('</dialog>', dialog_start)
+        dialog = self.html[dialog_start:dialog_end]
+        self.assertIn('aria-labelledby="action-confirm-title"', dialog)
+        self.assertIn('aria-describedby="action-confirm-message"', dialog)
+        self.assertNotIn('<form', dialog)
+        self.assertEqual(dialog.count('type="button"'), 2)
+        self.assertIn('id="action-confirm-cancel"', dialog)
+        self.assertIn('id="action-confirm-accept"', dialog)
+
     def test_release_version_is_consistent_across_backend_frontend_and_build(self):
-        self.assertIn("WEBUI_VERSION = '0.12.0'", self.backend)
-        self.assertIn("FRONTEND_VERSION = '0.12.0'", self.js)
-        self.assertIn('WebUI 0.12.0 · Python', self.html)
+        self.assertIn("WEBUI_VERSION = '0.12.1'", self.backend)
+        self.assertIn("FRONTEND_VERSION = '0.12.1'", self.js)
+        self.assertIn('WebUI 0.12.1 · Python', self.html)
         with open(os.path.join(ROOT, 'build.sh'), encoding='utf-8') as handle:
-            self.assertIn('VERSION=${VERSION:-0.12.0}', handle.read())
+            self.assertIn('VERSION=${VERSION:-0.12.1}', handle.read())
 
     def test_github_update_stages_only_ffp_webui_and_manual_install_is_in_browser(self):
         for endpoint in ('/api/self-update', '/api/self-update/check', '/api/self-update/install'):

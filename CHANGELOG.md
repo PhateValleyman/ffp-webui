@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1 — 2026-10-26
+
+- Ve všech kartách jsou potvrzení akcí sjednocena do přístupného dialogu s tlačítky Zrušit a pojmenovaným potvrzením. Nahrazeno je i všech 42 bran vyžadujících opsání slova či fráze; běžné vstupní prompty zůstávají.
+- Dialog zachovává upozornění a podrobnosti akce, lze jej ovládat klávesnicí, výchozí fokus je bezpečně na Zrušit a Enter nemůže odeslat skrytý formulář. Serverové kontroly a potvrzovací payloady zůstávají beze změny.
+- Přidány regresní testy dialogu a kontraktu; žádná instalace ani změna na cílovém NASu nebyla provedena.
+
 ## 0.12.0 — 2026-10-25
 
 - Přidáno ADB zrcadlení obrazovky bez `scrcpy` či instalace na Androidu: živý náhled v prohlížeči, klepnutí/tažení, navigační klávesy Zpět/Domů/Nedávné a omezený textový vstup.

@@ -1,13 +1,15 @@
-# FFP WebUI 0.12.0 — Zyxel NSA320
+# FFP WebUI 0.12.1 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly. Pro v0.12.0 byla na cílovém NASu pouze read-only ověřena kompatibilita ADB snímání obrazovky; WebUI nebylo aktualizováno a dotykový ani textový vstup nebyl odeslán.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly. Ve v0.12.0 byla na cílovém NASu pouze read-only ověřena kompatibilita ADB snímání obrazovky; WebUI nebylo aktualizováno a dotykový ani textový vstup nebyl odeslán. Verze v0.12.1 mění pouze potvrzovací rozhraní; na NAS nebyla instalována ani tam neprovedla žádnou změnu.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
 
-## Novinky v 0.12.0
+## Novinky v 0.12.1
 
+- Potvrzení akcí ve všech kartách používají jednotný dialog s explicitními tlačítky **Zrušit** a tlačítkem pojmenovaným podle akce, například **Smazat**, **Restartovat** nebo **Použít změny**. Upozornění, cíle i rekapitulace přenosů zůstávají viditelné; žádnou frázi není třeba opisovat.
+- Dialog je ovladatelný klávesnicí; po otevření je zaměřeno Zrušit, Escape potvrzení zruší a Enter neodesílá formulář. Přesné serverové kontroly zůstávají zachované.
 - Karta **ADB zařízení** nabízí živý náhled obrazovky připojeného Androidu a základní ovládání klepnutím/tažením, navigačními tlačítky Zpět/Domů/Nedávné a omezeným textovým vstupem. Nepoužívá `scrcpy`, neinstaluje aplikaci do Androidu a snímky neukládá.
-- Snímek se obnovuje přibližně jednou za sekundu. Read-only test na NASu potvrdil funkčnost `adb exec-out screencap -p` s jeho ADB 1.0.32 a připojeným tabletem; žádný vstup do tabletu nebyl odeslán a vydání v0.12.0 nebylo na NAS instalováno.
+- Snímek se obnovuje přibližně jednou za sekundu. Read-only test na NASu potvrdil funkčnost `adb exec-out screencap -p` s jeho ADB 1.0.32; žádný vstup do tabletu nebyl odeslán a WebUI v0.12.0 nebylo na NAS instalováno.
 - WebUI nemá přihlášení; obrazovka i text odeslaný do zařízení mohou obsahovat citlivé údaje. Zrcadlení používejte pouze v důvěryhodné soukromé síti a jen na zařízení, které smíte ovládat.
 
 ## Novinky v 0.11.0
@@ -106,19 +108,20 @@ Stažený instalátor se **nikdy sám nenainstaluje**. V kartě **Balíčky → 
 ```sh
 python3 -m py_compile ffp/ffp/bin/ffp-webui ffp/ffp/bin/ffp_webui_rclone.py ffp/ffp/bin/ffp_webui_luanti.py ffp/ffp/bin/ffp_webui_update.py
 python3 -m unittest discover -s tests -v
+go test ./...
 node --check internal/webui/assets/app.js
 sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.12.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.12.0-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.12.0/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.12.1-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.12.1-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.12.1/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
-Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.12.0](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.12.0) README, instalátor `ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.12.0-source.tgz` a manifest `ffp-webui-0.12.0-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
+Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.12.1](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.12.1) README, instalátor `ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.12.1-source.tgz` a manifest `ffp-webui-0.12.1-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
 
 ```sh
 cd /cesta/k/prenesenym-souborum
-sha256sum -c ffp-webui-0.12.0-SHA256SUMS
-funpkg -i ./ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.12.1-SHA256SUMS
+funpkg -i ./ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -129,9 +132,9 @@ Na cílovém NASu bylo ověřeno, že `funpkg -u <nový-archiv>` vrací „Not i
 Demo běží ze stage a používá pouze fiktivní data:
 
 ```sh
-python3 dist/stage-0.12.0/ffp/bin/ffp-webui --config dist/stage-0.12.0/ffp/etc/ffp-webui/config.json --demo
+python3 dist/stage-0.12.1/ffp/bin/ffp-webui --config dist/stage-0.12.1/ffp/etc/ffp-webui/config.json --demo
 ```
 
 ## Stav ověření
 
-Pro v0.12.0 prošly všechny lokální kontroly syntaxe, 126 Python testů, Go testy, build, SHA-256 ověření artefaktů a HTTP/Chromium smoke test staged balíku v demo režimu. Na NSA320 s ADB 1.0.32 byl bez zápisu do Androidu úspěšně získán platný PNG snímek přes `exec-out screencap -p`. Nebyla testována interakce s dotykem/textem a WebUI v0.12.0 nebylo na NAS instalováno. Dřívější read-only `zy-pkgs query` příkazy na NSA320 byly ověřeny; během vývoje v0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání. Historický test v0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na v0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, modul `sqlite3` statického Pythonu a přístup ke zvoleným cestám.
+Pro v0.12.1 prošlo 127 Python testů, Go testy, kontroly syntaxe Pythonu/JavaScriptu/shellu, build a SHA-256 ověření. Chromium ověřilo dialogy, klávesové ovládání a mobilní šířku nad skutečnými frontendovými soubory ze staged balíku, podávanými lokálním statickým HTTP serverem. Celý demo backend nebylo možné znovu spustit: demo režim má pevný localhost port 8888, který obsazoval již běžící lokální proces; tento proces zůstal nedotčen. Na NSA320 s ADB 1.0.32 byl bez zápisu do Androidu úspěšně získán platný PNG snímek přes `exec-out screencap -p`. Nebyla testována interakce s dotykem/textem a WebUI v0.12.0 nebylo na NAS instalováno. Dřívější read-only `zy-pkgs query` příkazy na NSA320 byly ověřeny; během vývoje v0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání. Historický test v0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na v0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, modul `sqlite3` statického Pythonu a přístup ke zvoleným cestám.

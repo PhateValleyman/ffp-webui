@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.12.0';
+const FRONTEND_VERSION = '0.12.1';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -38,6 +38,70 @@ function toast(message, error = false) {
   el.classList.add('visible');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('visible'), 3600);
+}
+
+let pendingActionConfirmation = null;
+const actionConfirmDialog = $('#action-confirm-dialog');
+const actionConfirmButton = $('#action-confirm-accept');
+const actionConfirmCancel = $('#action-confirm-cancel');
+actionConfirmButton.addEventListener('click', () => actionConfirmDialog.close('confirm'));
+actionConfirmCancel.addEventListener('click', () => actionConfirmDialog.close('cancel'));
+actionConfirmDialog.addEventListener('close', () => {
+  const resolve = pendingActionConfirmation;
+  pendingActionConfirmation = null;
+  if (resolve) resolve(actionConfirmDialog.returnValue === 'confirm');
+});
+actionConfirmDialog.addEventListener('keydown', event => {
+  // There is deliberately no form or default submit action in this dialog.
+  // Enter on the dialog background must never trigger a destructive action.
+  if (event.key === 'Enter' && event.target === actionConfirmDialog) event.preventDefault();
+});
+function confirmAction(message, confirmLabel = 'Potvrdit', { danger = false } = {}) {
+  if (actionConfirmDialog.open || pendingActionConfirmation) return Promise.resolve(false);
+  $('#action-confirm-title').textContent = confirmLabel;
+  $('#action-confirm-message').textContent = message;
+  actionConfirmButton.textContent = confirmLabel;
+  actionConfirmButton.classList.toggle('button-danger', danger);
+  actionConfirmButton.classList.toggle('button-primary', !danger);
+  actionConfirmDialog.returnValue = '';
+  return new Promise(resolve => {
+    pendingActionConfirmation = resolve;
+    actionConfirmDialog.showModal();
+    // Default focus is the safe choice; confirming requires an intentional focus change.
+    actionConfirmCancel.focus();
+  });
+}
+function confirmationLabel(confirmationText) {
+  const text = String(confirmationText || '').toUpperCase();
+  if (text.startsWith('DELETE PLAYER')) return 'Odebrat účet';
+  if (text.startsWith('DELETE SERVICE')) return 'Smazat službu';
+  if (text.startsWith('DELETE RCLONE REMOTE')) return 'Odebrat konfiguraci';
+  if (text.startsWith('DELETE SELECTED')) return 'Smazat vybrané';
+  if (text.startsWith('INSTALL APK')) return 'Instalovat APK';
+  if (text.startsWith('SAVE SERVICE')) return 'Uložit skript';
+  if (text.startsWith('SET PASSWORD')) return 'Nastavit heslo';
+  if (text.startsWith('PREPARE WORLD OWNER')) return 'Připravit vlastníka';
+  if (text.startsWith('UPDATE ZYPKG') || text.startsWith('UPDATE FFP PACKAGE')) return 'Obnovit seznamy';
+  if (text.startsWith('RCLONE COPY')) return 'Přenést soubory';
+  if (text.startsWith('CLEAR APP DATA')) return 'Vymazat data';
+  const first = text.split(/[ \n]/, 1)[0];
+  return ({
+    APPLY: 'Použít změny', BACKUP: 'Zálohovat', CHMOD: 'Změnit oprávnění', CLEAR: 'Vymazat',
+    COPY: 'Kopírovat', CREATE: 'Vytvořit', DELETE: 'Smazat', FREEZE: 'Vypnout aplikaci',
+    INSTALL: 'Instalovat', KILL: 'Ukončit', MOUNT: 'Připojit', REMOVE: 'Odstranit',
+    REBOOT: 'Restartovat', REINSTALL: 'Přeinstalovat', RENAME: 'Přejmenovat', RESTART: 'Restartovat',
+    RUN: 'Spustit', SAVE: 'Uložit', SET: 'Nastavit', SHUTDOWN: 'Vypnout', START: 'Spustit',
+    STOP: 'Zastavit', UNFREEZE: 'Povolit aplikaci', UNINSTALL: 'Odinstalovat', UNMOUNT: 'Odpojit',
+    UPDATE: 'Aktualizovat', UPLOAD: 'Nahrát', UPGRADE: 'Aktualizovat'
+  })[first] || 'Potvrdit';
+}
+function confirmGuardedAction(message, confirmationText) {
+  const detail = String(message || '').replace(/(?:\n\s*)?(?:Pro [^\n.!?]*?\s+)?zadejte(?: přesně)?\s*:?\s*[\s\S]*$/iu, '')
+    .replace(/(?:\n\s*)?(?:zkontrolujte soubor a\s+)?potvrďte přesně\s*:?\s*[\s\S]*$/iu, '').trim();
+  const details = [detail, `Akce: ${confirmationText}`].filter(Boolean).join('\n\n');
+  const label = confirmationLabel(confirmationText);
+  const danger = /^(?:DELETE|REMOVE|UNINSTALL|SHUTDOWN|REBOOT|RESTART|STOP|KILL|CHMOD|CLEAR APP DATA|RUN ANDROID SCRIPT)\b/i.test(String(confirmationText || ''));
+  return confirmAction(details, label, { danger });
 }
 
 async function api(path, options = {}) {
@@ -208,7 +272,7 @@ async function loadServices() {
   }
 }
 async function serviceAction(name, action) {
-  if (!confirm(`${action.toUpperCase()} službu ${name}?`)) return;
+  if (!(await confirmAction(`${action.toUpperCase()} službu ${name}?`, ({ start: 'Spustit službu', stop: 'Zastavit službu', restart: 'Restartovat službu', kill: 'Ukončit službu', 'autostart-on': 'Zapnout autostart', 'autostart-off': 'Vypnout autostart' }[action] || 'Potvrdit'), { danger: ['stop', 'kill'].includes(action) }))) return;
   const phrase = action === 'kill' ? 'STOP' : action.toUpperCase();
   try {
     await post('/api/services/action', { name, action, confirm: `${phrase} ${name}` });
@@ -226,9 +290,9 @@ $('#service-new').addEventListener('click', async () => {
     toast('Zadejte bezpečný název *.sh; ffp-webui.sh je chráněný.', true);
     return;
   }
-  const enabled = confirm('Zapnout autostart hned po vytvoření? Skript se při bootu spustí jako root.');
+  const enabled = await confirmAction('Zapnout autostart hned po vytvoření? Skript se při bootu spustí jako root.', 'Zapnout autostart');
   const phrase = `CREATE SERVICE ${name}`;
-  if (prompt(`Vytvoří se start skript, který se nyní nespustí. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Vytvoří se start skript, který se nyní nespustí. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try {
     const result = await post('/api/services/manage', { action: 'create', name, content: '#!/ffp/bin/sh\n\n', enabled, confirm: phrase });
     toast(`Skript ${name} vytvořen. Nebyl spuštěn.`);
@@ -238,7 +302,7 @@ $('#service-new').addEventListener('click', async () => {
 });
 async function manageService(action, name) {
   const phrase = `DELETE SERVICE ${name}`;
-  if (prompt(`Skript bude před smazáním zazálohován. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Skript bude před smazáním zazálohován. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try {
     await post('/api/services/manage', { action, name, confirm: phrase });
     toast(`Služba ${name} smazána; záloha je uložena.`);
@@ -396,19 +460,19 @@ async function toggleLuantiMod(name, enabled) {
   catch (error) { toast(error.message, true); }
 }
 async function backupLuantiItem(kind, name) {
-  if (!confirm(`Vytvořit tar.gz zálohu ${kind}/${name}? Server musí být vypnutý.`)) return;
+  if (!(await confirmAction(`Vytvořit tar.gz zálohu ${kind}/${name}? Server musí být vypnutý.`, 'Vytvořit zálohu'))) return;
   try { const data = await post('/api/luanti/item/backup', { kind, name }); toast(`Záloha ${data.result.name} vytvořena.`); await loadLuantiBackups(); }
   catch (error) { toast(error.message, true); }
 }
 async function deleteLuantiItem(kind, name) {
   const phrase = `DELETE ${kind} ${name}`;
-  if (prompt(`Položka bude před smazáním zazálohována. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Položka bude před smazáním zazálohována. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try { await post('/api/luanti/item/delete', { kind, name, confirm: phrase }); toast(`${kind}/${name} smazáno; záloha je dostupná.`); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 }
 async function deleteLuantiPlayer(name) {
   const phrase = `DELETE PLAYER ${name}`;
-  if (prompt(`Smaže auth a oprávňovací záznam; inventář a poloha zůstanou pro obnovu. Zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Smaže auth a oprávňovací záznam; inventář a poloha zůstanou pro obnovu. Zadejte: ${phrase}`, phrase))) return;
   try { await post('/api/luanti/player', { action: 'delete', name, confirm: phrase }); toast(`Auth účet ${name} odebrán; světová data zůstala.`); await loadLuantiPlayers(); await loadLuantiBackups(); }
   catch (error) { toast(error.message, true); }
 }
@@ -462,19 +526,19 @@ async function openLuantiReadme(kind, name) {
 $('#luanti-readme-close').addEventListener('click', () => { $('#luanti-readme-card').hidden = true; });
 $('#luanti-start').addEventListener('click', async () => {
   const phrase = 'START LUANTI';
-  if (prompt(`Spustí Luanti jako vybraný účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Spustí Luanti jako vybraný účet. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try { await luantiRequest('start', phrase); toast('Luanti server spuštěn.'); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 });
 $('#luanti-stop').addEventListener('click', async () => {
   const phrase = 'STOP LUANTI';
-  if (prompt(`Zastavit Luanti server? Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Zastavit Luanti server? Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try { await luantiRequest('stop', phrase); toast('Luanti server zastaven.'); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 });
 $('#luanti-restart').addEventListener('click', async () => {
   const phrase = 'RESTART LUANTI';
-  if (prompt(`Server se zastaví a znovu spustí. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Server se zastaví a znovu spustí. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try { await luantiRequest('restart', phrase); toast('Luanti server restartován.'); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 });
@@ -514,7 +578,7 @@ $('#luanti-settings-form').addEventListener('submit', async event => {
 $('#luanti-prepare-owner').addEventListener('click', async () => {
   const world = $('#luanti-world-select').value; if (!world) return toast('Vyberte svět.', true);
   const phrase = `PREPARE WORLD OWNER ${world}`;
-  if (prompt(`Rekurzivně změní vlastníka všech souborů světa na vybraný servisní účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Rekurzivně změní vlastníka všech souborů světa na vybraný servisní účet. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try { const result = await post('/api/luanti/permissions', { confirm: phrase }); toast(`Vlastník nastaven u ${result.result.entries} položek světa.`); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 });
@@ -531,7 +595,7 @@ $('#luanti-world-form').addEventListener('submit', async event => {
 $('#luanti-import-form').addEventListener('submit', async event => {
   event.preventDefault(); const file = $('#luanti-import-file').files[0]; if (!file) return;
   const kind = $('#luanti-import-kind').value; const name = $('#luanti-import-name').value.trim();
-  if (!confirm(`Importovat ${file.name} jako ${kind}/${name}? Server musí být vypnutý a archiv může obsahovat spustitelný mod/game kód.`)) return;
+  if (!(await confirmAction(`Importovat ${file.name} jako ${kind}/${name}? Server musí být vypnutý a archiv může obsahovat spustitelný mod/game kód.`, 'Importovat', { danger: true }))) return;
   try {
     await api(`/api/luanti/item/upload?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, timeoutMs: 0 });
     event.currentTarget.reset(); toast('Archiv bezpečně rozbalen a importován.'); await loadLuanti();
@@ -539,7 +603,7 @@ $('#luanti-import-form').addEventListener('submit', async event => {
 });
 $('#luanti-player-form').addEventListener('submit', async event => {
   event.preventDefault(); const name = $('#luanti-player-name').value.trim(); const phrase = `CREATE PLAYER ${name} WITHOUT PASSWORD`;
-  if (prompt(`Vytvoří offline auth záznam bez hesla. Nastavte heslo v Luanti před veřejným přístupem. Zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Vytvoří offline auth záznam bez hesla. Nastavte heslo v Luanti před veřejným přístupem. Zadejte: ${phrase}`, phrase))) return;
   try { await post('/api/luanti/player', { action: 'add', name, confirm: phrase }); event.currentTarget.reset(); toast(`Hráč ${name} přidán bez hesla.`); await loadLuantiPlayers(); await loadLuantiBackups(); }
   catch (error) { toast(error.message, true); }
 });
@@ -583,7 +647,7 @@ async function loadEnv() {
       const remove = node('button', 'Smazat', 'button button-danger');
       remove.addEventListener('click', async () => {
         const confirmText = `DELETE ${entry.key}`;
-        if (prompt(`Pro potvrzení smazání zadejte: ${confirmText}`) !== confirmText) return;
+        if (!(await confirmGuardedAction(`Pro potvrzení smazání zadejte: ${confirmText}`, confirmText))) return;
         try {
           await post('/api/env', { action: 'delete', key: entry.key, confirm: confirmText });
           toast('Proměnná smazána.');
@@ -855,7 +919,7 @@ function openUserPassword(user) {
 
 async function accountAction(user, action) {
   const phrase = `${action.toUpperCase()} ${user.username}`;
-  if (prompt(`Pro potvrzení zadejte přesně: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Pro potvrzení zadejte přesně: ${phrase}`, phrase))) return;
   try {
     await post('/api/users/action', { username: user.username, action, confirm: phrase });
     toast(`Akce ${action} dokončena pro ${user.username}.`);
@@ -865,7 +929,7 @@ async function accountAction(user, action) {
 
 async function deleteUser(user) {
   const phrase = `DELETE ${user.username}`;
-  if (prompt(`Účet bude odstraněn bez -r (home se nemaže). Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Účet bude odstraněn bez -r (home se nemaže). Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try {
     await post('/api/users/delete', { username: user.username, confirm: phrase });
     toast(`Účet ${user.username} odstraněn; home zůstává.`);
@@ -887,7 +951,7 @@ $('#user-add-form').addEventListener('submit', async event => {
   if (!accountData || accountData.demo) return;
   const username = $('#user-add-name').value.trim();
   const phrase = `CREATE ${username}`;
-  if (prompt(`Pro potvrzení zadejte přesně: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Pro potvrzení zadejte přesně: ${phrase}`, phrase))) return;
   const privateGroup = $('#user-add-private').checked;
   const payload = {
     username,
@@ -914,7 +978,7 @@ $('#user-edit-save').addEventListener('click', async () => {
   if (!editingUser || !accountData || accountData.demo) return;
   const user = editingUser;
   const phrase = `UPDATE ${user.username}`;
-  if (prompt(`Pro potvrzení zadejte přesně: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Pro potvrzení zadejte přesně: ${phrase}`, phrase))) return;
   const payload = {
     username: user.username,
     confirm: phrase,
@@ -944,7 +1008,7 @@ $('#user-password-save').addEventListener('click', async () => {
     return;
   }
   const phrase = `SET PASSWORD ${username}`;
-  if (prompt(`Pro potvrzení zadejte přesně: ${phrase}`) !== phrase) {
+  if (!(await confirmGuardedAction(`Pro potvrzení zadejte přesně: ${phrase}`, phrase))) {
     field.value = '';
     repeatField.value = '';
     return;
@@ -1090,7 +1154,7 @@ $('#zypkg-action-form').addEventListener('submit', async event => {
   const confirmText = ['install', 'uninstall'].includes(action)
     ? `${action.toUpperCase()} ${name} ${version}` : `${action.toUpperCase()} ${name}`;
   const warning = `Příkaz bude spuštěn jako správce NASu. Instalace nebo odebrání může ovlivnit firmware a závislosti; automatický návrat ani záloha nejsou k dispozici.\n\nPro pokračování zadejte přesně:\n${confirmText}`;
-  if (prompt(warning) !== confirmText) return;
+  if (!(await confirmGuardedAction(warning, confirmText))) return;
   const button = $('#zypkg-action-submit');
   button.disabled = true;
   try {
@@ -1102,7 +1166,7 @@ $('#zypkg-action-form').addEventListener('submit', async event => {
 });
 $('#zypkg-update-list').addEventListener('click', async () => {
   const confirmText = 'UPDATE ZYPKG LISTS';
-  if (prompt(`Aktualizace seznamu může kontaktovat nastavené Zypkg repozitáře. Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Aktualizace seznamu může kontaktovat nastavené Zypkg repozitáře. Pro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   const button = $('#zypkg-update-list');
   button.disabled = true;
   try {
@@ -1195,7 +1259,7 @@ $('#self-update-install').addEventListener('click', async () => {
   }
   const confirmText = `UPGRADE ${update.asset_name}`;
   const safetyNote = 'Aktualizujete výhradně FFP-WebUI z ověřeného GitHub stagingu. WebUI samo nevytváří zálohu ani rollback: před instalací zazálohujte soubory uvedené v /ffp/funpkg/installed/ffp-webui-* a konfiguraci /ffp/etc/ffp-webui/. Po instalaci restartujte službu FFP-WebUI.';
-  if (prompt(`${safetyNote}\n\nPro potvrzení zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`${safetyNote}\n\nPro potvrzení zadejte přesně:\n${confirmText}`, confirmText))) return;
   const button = $('#self-update-install');
   button.disabled = true;
   try {
@@ -1238,7 +1302,7 @@ function renderPackageCatalog() {
 async function packageCatalogAction(item, action) {
   const confirmText = action === 'remove' ? `REMOVE ${item.installed}` : `${action.toUpperCase()} ${item.name} ${item.available}`;
   const explanation = action === 'remove' ? 'Funpkg odebere soubory instalovaného balíčku a neřeší závislosti.' : 'Balíček bude stažen z aktuálního katalogu, kontrolován podle FFP CHECKSUMS.md5 a předán funpkg.';
-  if (prompt(`${explanation}\n\nPro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`${explanation}\n\nPro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   try {
     const job = await post('/api/packages/catalog/action', { action, name: item.name, installed: item.installed, available: item.available, location: item.location, confirm: confirmText });
     toast(`Balíčková akce spuštěna (úloha ${job.id}).`);
@@ -1250,7 +1314,7 @@ $('#package-catalog-search').addEventListener('input', renderPackageCatalog);
 $('#package-catalog-filter').addEventListener('change', renderPackageCatalog);
 $('#package-catalog-update').addEventListener('click', async () => {
   const confirmText = 'UPDATE FFP PACKAGE LISTS';
-  if (prompt(`Obnovení indexů kontaktuje repozitáře uvedené v /ffp/etc/funpkg/sites. Pro potvrzení zadejte: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Obnovení indexů kontaktuje repozitáře uvedené v /ffp/etc/funpkg/sites. Pro potvrzení zadejte: ${confirmText}`, confirmText))) return;
   try {
     const job = await post('/api/packages/catalog/update', { confirm: confirmText });
     toast(`Obnovení indexů spuštěno (úloha ${job.id}).`);
@@ -1272,7 +1336,7 @@ async function packageAction(archive, action) {
   const safetyNote = selfUpdate
     ? 'Aktualizujete samotné FFP-WebUI. Zálohujte /ffp/etc/ffp-webui/config.json; tento balík nebyl ověřen na NSA320. Po dokončení restartujte službu FFP-WebUI.'
     : 'Zkontrolujte název a hash balíčku.';
-  if (prompt(`${safetyNote}\n\nPro akci zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`${safetyNote}\n\nPro akci zadejte přesně:\n${confirmText}`, confirmText))) return;
   try {
     const result = await post('/api/packages/action', { action, path: archive.path, sha256: archive.sha256, confirm: confirmText });
     if (result.id) {
@@ -1309,7 +1373,7 @@ async function showPackageDetails(name) {
 async function uninstallInstalledPackage(name) {
   const confirmText = `REMOVE ${name}`;
   const message = `Funpkg odstraní instalované soubory balíčku. Závislosti automaticky nekontroluje.\n\nPro potvrzení zadejte přesně:\n${confirmText}`;
-  if (prompt(message) !== confirmText) return;
+  if (!(await confirmGuardedAction(message, confirmText))) return;
   try {
     const job = await post('/api/packages/uninstall', { name, confirm: confirmText });
     toast(`Odinstalace spuštěna (úloha ${job.id}).`);
@@ -1744,8 +1808,8 @@ function editFileBookmark(bookmark) {
   const path = prompt('Cesta:', bookmark.path); if (path === null || !path.trim()) return;
   bookmark.label = label.trim().slice(0, 100); bookmark.path = path.trim(); storeFileBookmarks();
 }
-function deleteFileBookmark(bookmark) {
-  if (!confirm(`Smazat záložku „${bookmark.label}“?`)) return;
+async function deleteFileBookmark(bookmark) {
+  if (!(await confirmAction(`Smazat záložku „${bookmark.label}“?`, 'Smazat záložku', { danger: true }))) return;
   fileBookmarks = fileBookmarks.filter(item => item.id !== bookmark.id); storeFileBookmarks();
 }
 async function openFileBookmark(bookmark, side) {
@@ -1888,7 +1952,7 @@ async function openRcloneConfig(name = '') {
 }
 async function deleteRcloneRemote(name) {
   const phrase = `DELETE RCLONE REMOTE ${name}`;
-  if (prompt(`Odebere pouze konfiguraci remote „${name}“, nikoli soubory v cloudu. Pro potvrzení zadejte přesně:\n${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Odebere pouze konfiguraci remote „${name}“, nikoli soubory v cloudu. Pro potvrzení zadejte přesně:\n${phrase}`, phrase))) return;
   try {
     await post('/api/rclone/config/delete', { name, confirm: phrase });
     toast(`Konfigurace remote ${name} byla odebrána.`);
@@ -2071,7 +2135,7 @@ async function uploadPanelFiles(event, side) {
         await api('/api/files/upload?' + query, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
       } else {
         const remote = joinPanelPath(state.path, file.name);
-        if (!confirm(`Nahrát ${file.name} do ${remote}? Existující soubor může být přepsán.`)) continue;
+        if (!(await confirmAction(`Nahrát ${file.name} do ${remote}? Existující soubor může být přepsán.`, 'Nahrát', { danger: true }))) continue;
         const query = adbQuery({ serial: state.serial, path: state.path, filename: file.name, confirm: `UPLOAD ${remote}` });
         await api('/api/adb/upload?' + query, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
       }
@@ -2090,7 +2154,7 @@ async function uploadPanelArchive(event, side) {
       event.currentTarget.reset(); toast(`Archiv rozbalen: ${result.extracted.files} souborů.`); await loadDualPanel(side);
     } else {
       const confirmText = `UPLOAD ARCHIVE ${file.name} TO ${state.path}`;
-      if (prompt(`Obsah archivu se bezpečně rozbalí a nahraje do ${state.path}; existující cíle mohou být nahrazeny. Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+      if (!(await confirmGuardedAction(`Obsah archivu se bezpečně rozbalí a nahraje do ${state.path}; existující cíle mohou být nahrazeny. Pro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
       const query = adbQuery({ serial: state.serial, path: state.path, name: file.name, confirm: confirmText });
       const job = await api('/api/adb/archive-upload?' + query, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, timeoutMs: 0 });
       event.currentTarget.reset(); toast(`ADB archiv se nahrává (úloha ${job.id}).`); pollJob(job.id, 'Archiv byl nahrán do zařízení.', () => loadDualPanel(side));
@@ -2127,7 +2191,7 @@ async function copyPanelSelection(side) {
       toast('Přímý přenos ADB ↔ rclone není dostupný; použijte NAS jako mezikrok.', true); return;
     }
     const phrase = `RCLONE COPY ${paths.length}`;
-    if (prompt(`Rclone přenese ${paths.length} položek z ${sourceLabel} do ${destinationLabel}. Při shodě názvů může cílový soubor aktualizovat/přepsat; kopírování nemaže jiné cílové soubory. Potvrďte přesně: ${phrase}`) !== phrase) return;
+    if (!(await confirmGuardedAction(`Rclone přenese ${paths.length} položek z ${sourceLabel} do ${destinationLabel}. Při shodě názvů může cílový soubor aktualizovat/přepsat; kopírování nemaže jiné cílové soubory. Potvrďte přesně: ${phrase}`, phrase))) return;
     const descriptor = state => ['rclone', 'sftp'].includes(state.source)
       ? { kind: state.source, remote: state.remote, path: state.path }
       : state.source === 'sshfs'
@@ -2145,7 +2209,7 @@ async function copyPanelSelection(side) {
     return;
   }
   const confirmText = `COPY ${paths.length} ITEMS TO ${destinationLabel}`;
-  if (prompt(`Kopírovat ${paths.length} vybraných položek z ${sourceLabel} do ${destinationLabel}? Při konfliktu názvů se přenos odmítne. Potvrďte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Kopírovat ${paths.length} vybraných položek z ${sourceLabel} do ${destinationLabel}? Při konfliktu názvů se přenos odmítne. Potvrďte přesně: ${confirmText}`, confirmText))) return;
   const sourceIsAdb = source.source === 'adb';
   const archiveName = sourceIsAdb ? 'android-selection.zip' : 'selected-files.tar.gz';
   const archiveEndpoint = sourceIsAdb ? '/api/adb/archive-selection' : '/api/files/archive-selection';
@@ -2203,7 +2267,7 @@ async function downloadPanelSelection(side) {
 async function deletePanelSelection(side) {
   const state = dualFiles[side]; const selected = [...state.selected]; if (!selected.length || state.source !== 'nas') return;
   const phrase = `DELETE SELECTED ${selected.length}`;
-  if (prompt(`Vybrané soubory a složky budou před smazáním zazálohovány. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Vybrané soubory a složky budou před smazáním zazálohovány. Pro potvrzení zadejte: ${phrase}`, phrase))) return;
   try {
     for (const path of selected) {
       const entry = state.entries.find(item => panelEntryPath(side,item) === path);
@@ -2229,7 +2293,7 @@ $('#editor-save').addEventListener('click', async () => {
   if (!editorPath) return;
   if (editorService) {
     const confirmService = `SAVE SERVICE ${editorService.name}`;
-    if (prompt(`Skript služby se před uložením zazálohuje; zachová se jeho aktuální autostart stav. Pro potvrzení zadejte: ${confirmService}`) !== confirmService) return;
+    if (!(await confirmGuardedAction(`Skript služby se před uložením zazálohuje; zachová se jeho aktuální autostart stav. Pro potvrzení zadejte: ${confirmService}`, confirmService))) return;
     try {
       const result = await post('/api/services/manage', { action: 'save', name: editorService.name, content: $('#editor-content').value, enabled: editorService.enabled, confirm: confirmService });
       $('#editor-dialog').close(); editorService = null; toast(result.note || 'Skript služby uložen a zazálohován.'); await loadServices();
@@ -2238,7 +2302,7 @@ $('#editor-save').addEventListener('click', async () => {
   }
   const base = editorPath.split('/').pop();
   const confirmText = `SAVE ${base}`;
-  if (prompt(`Soubor se před uložením zazálohuje, pokud již existuje. Pro uložení zadejte: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Soubor se před uložením zazálohuje, pokud již existuje. Pro uložení zadejte: ${confirmText}`, confirmText))) return;
   try {
     const result = await post('/api/files/save', { path: editorPath, content: $('#editor-content').value, confirm: confirmText });
     $('#editor-dialog').close();
@@ -2252,7 +2316,7 @@ async function deleteFile(path, isDirectory = false) {
   const base = path.split('/').pop();
   const confirmText = isDirectory ? `DELETE RECURSIVELY ${base}` : `DELETE ${base}`;
   const explanation = isDirectory ? 'Složka bude zazálohována jako archiv a poté smazána včetně obsahu.' : 'Soubor bude nejprve zazálohován.';
-  if (prompt(`${explanation} Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`${explanation} Pro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   try {
     const result = await post('/api/files/delete', { path, confirm: confirmText });
     toast(isDirectory ? `Složka smazána; záloha: ${result.backup}` : 'Soubor smazán; záloha byla vytvořena.');
@@ -2265,7 +2329,7 @@ async function renameFile(path) {
   const name = prompt(`Nový název pro ${path}:`, oldName);
   if (name === null || name === oldName) return;
   const confirmText = `RENAME ${path} -> ${name}`;
-  if (prompt(`Pro přejmenování zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Pro přejmenování zadejte přesně: ${confirmText}`, confirmText))) return;
   try {
     await post('/api/files/rename', { path, name, confirm: confirmText });
     toast('Přejmenováno.');
@@ -2276,7 +2340,7 @@ async function changeMode(path, fallback) {
   const mode = prompt(`Nová práva pro ${path} (osmičkově, bez SUID/SGID):`, fallback);
   if (mode === null) return;
   const confirmText = `CHMOD ${path} ${mode}`;
-  if (prompt(`Pro změnu práv zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Pro změnu práv zadejte přesně: ${confirmText}`, confirmText))) return;
   try {
     await post('/api/files/chmod', { path, mode, confirm: confirmText });
     toast(`Práva nastavena na ${mode}.`);
@@ -2285,7 +2349,7 @@ async function changeMode(path, fallback) {
 }
 async function runScript(path) {
   const confirmText = `RUN ${path}`;
-  if (prompt(`Skript se spustí jako uživatel WebUI. Pro spuštění zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Skript se spustí jako uživatel WebUI. Pro spuštění zadejte přesně:\n${confirmText}`, confirmText))) return;
   try {
     const job = await post('/api/files/run', { path, confirm: confirmText });
     toast(`Skript spuštěn (úloha ${job.id}).`);
@@ -2294,7 +2358,7 @@ async function runScript(path) {
 }
 async function runAdbScript(path, serial) {
   const phrase = `RUN ANDROID SCRIPT ${serial}:${path}`;
-  if (prompt(`Skript bude spuštěn na Android zařízení ${serial}. Zkontrolujte soubor a potvrďte přesně:\n${phrase}`) !== phrase) return;
+  if (!(await confirmGuardedAction(`Skript bude spuštěn na Android zařízení ${serial}. Před spuštěním zkontrolujte soubor.`, phrase))) return;
   try {
     const job = await post('/api/adb/run-script', { serial, path, confirm: phrase });
     toast(`ADB skript spuštěn (úloha ${job.id}).`);
@@ -2422,7 +2486,7 @@ $('#sshfs-mount-form').addEventListener('submit', async event => {
   confirmText += `\nPort ${port}\nIdmap ${idmap}\nReconnect ${reconnect ? 'yes' : 'no'}\nCompression ${compression ? 'yes' : 'no'}`;
   if (identityFile) confirmText += `\nIdentityFile ${identityFile}`;
   if (mountOptions) confirmText += `\nOptions ${mountOptions.split(',').map(item => item.trim()).join(',')}`;
-  if (prompt(`Připojí SSHFS vzdálený zdroj do lokální prázdné složky. Pro potvrzení zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Připojí SSHFS vzdálený zdroj do lokální prázdné složky. Pro potvrzení zadejte přesně:\n${confirmText}`, confirmText))) return;
   try {
     const result = await post('/api/sshfs/mount', {
       remote, mountpoint, port: portInput || '',
@@ -2437,7 +2501,7 @@ $('#sshfs-mount-form').addEventListener('submit', async event => {
 
 async function unmountSSHFS(mount) {
   const confirmText = `UNMOUNT ${mount.mountpoint}`;
-  if (prompt(`Mount bude odpojen ze systému. Pro potvrzení zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Mount bude odpojen ze systému. Pro potvrzení zadejte přesně:\n${confirmText}`, confirmText))) return;
   try {
     const result = await post('/api/sshfs/unmount', { mountpoint: mount.mountpoint, confirm: confirmText });
     toast(`SSHFS úloha ${result.id} spuštěna.`);
@@ -2489,7 +2553,7 @@ async function loadTweaksCron() {
 $('#tweaks-cron-refresh').addEventListener('click', loadTweaksCron);
 $('#tweaks-cron-apply').addEventListener('click', async () => {
   const confirmText = 'APPLY TWEAKS CRON';
-  if (prompt(`Úlohy Tweaks cronu se spouštějí jako root. Změny budou uloženy, zálohovány a ihned předány Tweaks. Pro potvrzení zadejte: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Úlohy Tweaks cronu se spouštějí jako root. Změny budou uloženy, zálohovány a ihned předány Tweaks. Pro potvrzení zadejte: ${confirmText}`, confirmText))) return;
   try {
     const job = await post('/api/tweaks/cron', { entries: $('#tweaks-cron-entries').value, enabled: $('#tweaks-cron-enabled').checked, confirm: confirmText });
     toast(`Tweaks cron se ukládá a aktivuje (úloha ${job.id}).`);
@@ -2535,7 +2599,7 @@ async function loadTweaks() {
 async function power(action) {
   const confirmText = action === 'restart' ? 'REBOOT NSA320' : 'SHUTDOWN NSA320';
   const verb = action === 'restart' ? 'restart' : 'shutdown';
-  if (prompt(`Pro potvrzení akce zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Pro potvrzení akce zadejte přesně:\n${confirmText}`, confirmText))) return;
   try {
     const data = await post('/api/power', { action: verb, confirm: confirmText });
     toast(data.message || 'Příkaz odeslán.');
@@ -2891,7 +2955,7 @@ async function loadAdb() {
       rebootButton.addEventListener('click', async () => {
         const mode = rebootMode.value;
         const phrase = `REBOOT ${mode.toUpperCase()} ${device.serial}`;
-        if (prompt(`Zařízení ${device.serial} se restartuje do režimu ${rebootMode.selectedOptions[0]?.textContent}. Pro potvrzení zadejte přesně: ${phrase}`) !== phrase) return;
+        if (!(await confirmGuardedAction(`Zařízení ${device.serial} se restartuje do režimu ${rebootMode.selectedOptions[0]?.textContent}. Pro potvrzení zadejte přesně: ${phrase}`, phrase))) return;
         try { const job = await post('/api/adb/reboot', { serial: device.serial, mode, confirm: phrase }); toast(`Restart zařízení spuštěn (úloha ${job.id}).`); pollJob(job.id, 'ADB zařízení bylo restartováno.', loadAdb); }
         catch (error) { toast(error.message, true); }
       });
@@ -2947,7 +3011,7 @@ async function adbAppAction(app, action) {
   const serial = $('#adb-app-device').value; const labels = { start: 'START APP', stop: 'STOP APP', freeze: 'FREEZE APP', unfreeze: 'UNFREEZE APP', uninstall: 'UNINSTALL APP', 'clear-cache': 'CLEAR APP CACHE', 'clear-data': 'CLEAR APP DATA' };
   const confirmText = `${labels[action]} ${app.package}`;
   const explanation = action === 'clear-data' ? 'Tato akce odstraní data aplikace.' : action === 'uninstall' && app.type === 'system' ? 'Systémový balíček zůstane v obrazu ROM; odebere se pouze uživateli 0.' : 'Akce změní stav aplikace v Androidu.';
-  if (prompt(`${explanation}\n\nPro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`${explanation}\n\nPro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   try { const job = await post('/api/adb/apps/action', { serial, package: app.package, action, confirm: confirmText }); toast(`ADB ${action} spuštěno (úloha ${job.id}).`); pollJob(job.id, `Akce dokončena: ${app.package}`, loadAdbApps); }
   catch (error) { toast(error.message, true); }
 }
@@ -2959,14 +3023,14 @@ $('#adb-app-install-form').addEventListener('submit', async event => {
   event.preventDefault(); const serial = $('#adb-app-device').value; const file = $('#adb-app-apk').files[0];
   if (!serial || !file) return toast('Vyberte připojené zařízení a APK soubor.', true);
   const confirmText = `INSTALL APK ${file.name} ON ${serial}`;
-  if (prompt(`Instalace APK ${file.name} do zařízení ${serial}. Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Instalace APK ${file.name} do zařízení ${serial}. Pro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   const query = adbQuery({ serial, filename: file.name, confirm: confirmText });
   try { const job = await api('/api/adb/apps/install?' + query, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, timeoutMs: 0 }); event.currentTarget.reset(); toast(`Instalace spuštěna (úloha ${job.id}).`); pollJob(job.id, 'APK nainstalováno.', loadAdbApps); }
   catch (error) { toast(error.message, true); }
 });
 $('#adb-refresh').addEventListener('click', loadAdb);
 $('#adb-server-restart').addEventListener('click', async () => {
-  if (!confirm('Restartovat ADB server na NASu? Připojené relace se mohou na chvíli přerušit.')) return;
+  if (!(await confirmAction('Restartovat ADB server na NASu? Připojené relace se mohou na chvíli přerušit.', 'Restartovat ADB server', { danger: true }))) return;
   try { const result = await post('/api/adb/server', { action: 'restart', confirm: 'RESTART ADB SERVER' }); toast(result.message || 'ADB server restartován.'); await loadAdb(); } catch (error) { toast(error.message, true); }
 });
 $('#adb-connect-form').addEventListener('submit', async event => {
@@ -2981,7 +3045,7 @@ async function openAdbEditor(path, serial) {
 $('#adb-editor-save').addEventListener('click', async () => {
   if (!adbEditorTarget) return;
   const confirmText = `SAVE ${adbEditorTarget.path}`;
-  if (prompt(`Změní vzdálený soubor. Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  if (!(await confirmGuardedAction(`Změní vzdálený soubor. Pro potvrzení zadejte přesně: ${confirmText}`, confirmText))) return;
   try { await post('/api/adb/save', { ...adbEditorTarget, content: $('#adb-editor-content').value, confirm: confirmText }); $('#adb-editor-dialog').close(); toast('Soubor v Android zařízení uložen.'); await loadDualFiles(); }
   catch (error) { toast(error.message, true); }
 });
