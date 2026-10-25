@@ -1,0 +1,29 @@
+# Poznámky k FFP WebUI 0.8.0: Rclone OAuth a aktualizace
+
+## Rclone remote správa a OAuth
+
+Cílový NAS má podle vlastníka `rclone v1.65.2-DEV`, staticky linkované pro ARMv5 bez hard-float, s Go 1.19.3; příkaz `rclone version` na Linuxu 2.6.31.8 běžel. Nové RC metody se proto musí zjišťovat schopnostním testem, nikoli předpokládat podle aktuální dokumentace.
+
+Oficiální [RC dokumentace](https://rclone.org/rc/) popisuje `config/create`, `config/update`, `config/delete`, `config/providers`, `config/get`, `config/oauthstatus` a `config/oauthstop`. `config/update` podporuje stejný neinteraktivní protokol otázek `state`/`result` jako create. Novější OAuth status/stop rozhraní a URL `authUrl` jsou uvedeny v [Rclone v1.75.0 changelogu](https://rclone.org/changelog/); nelze předpokládat, že je cílová v1.65.2 implementuje. Bridge má tyto metody feature-detectovat a zůstat použitelný bez nich.
+
+Pro headless NAS oficiální [Rclone Remote Setup](https://rclone.org/remote_setup/) doporučuje odpovědět „No“ na otázku místního browseru, provést `rclone authorize "<provider>"` na počítači s prohlížečem (ideálně se stejnou verzí Rclone) a vložit vrácený token do config otázky. Alternativou je SSH tunel `localhost:53682`; loopback callback URL z NASu se nedá bezpečně otevřít jako běžný odkaz z jiného zařízení, protože `127.0.0.1` by pak znamenalo klienta. UI nesmí předstírat, že samotné `authUrl` zpřístupní callback.
+
+Při editaci se nesmí raw `config/get` posílat do browseru: OAuth tokeny, hesla a citlivá pole zůstanou na serveru. V UI se zobrazí pouze běžné, bezpečné hodnoty a informace, že citlivá hodnota existuje; prázdné pole při editaci znamená „ponechat“, nová hodnota znamená „nahradit“. Výslovné „vymazat hodnotu“ posílá prázdný řetězec přes `config/update`, čímž se tajný obsah vymaže, ale volba zůstane v konfiguraci jako prázdná. Oficiální [config/unset dokumentace](https://rclone.org/commands/rclone_config_unset/) rozlišuje prázdný řetězec od odstranění klíče; `config/unset` přibyl až po cílové v1.65.2, takže jej zatím nepoužíváme. Smazání remote musí být samostatná potvrzená akce `config/delete`; nemaže data vzdáleného úložiště.
+
+## Kontrola aktualizací a self-update
+
+GitHub REST API pro [nejnovější release](https://docs.github.com/en/rest/releases/releases) funguje bez tokenu pro veřejný repozitář a poskytuje tag, `prerelease`/`draft`, assets, download URL a v aktuálním schématu případný asset `digest` SHA-256. Release `latest` je poslední publikovaný stabilní release podle data vytvoření/publikace, nikoli nutně nejvyšší semver, proto klient musí porovnat parsovaný tag s lokální verzí a ignorovat prerelease/draft.
+
+Doporučené pořadí:
+
+1. Veřejný repozitář je `PhateValleyman/ffp-webui`; kanonický release endpoint je `https://api.github.com/repos/PhateValleyman/ffp-webui/releases`. Klient smí tento identifikátor použít pouze přes HTTPS; při forku musí být repo identifikátor konfigurovatelný a prázdná hodnota vypne update UI.
+2. Nejprve přidat **read-only kontrolu**: přes HTTPS volat GitHub Releases API, povolit jen `api.github.com` a očekávané GitHub download domény po redirectu, omezit velikost/čas odpovědi, validovat stabilní tag `vMAJOR.MINOR.PATCH` a zobrazit poznámky. Bez přihlašovacího tokenu a bez automatického spuštění balíku.
+3. Stahování může být samostatná volba: stáhnout pouze přesně pojmenovaný `.txz` release asset do stagingu na persistované datové partition, ověřit SHA-256 z GitHub `digest`, nebo porovnat stažený checksum manifest podepsaný/verifikovaný v rámci důvěryhodné release cesty. Nepokračovat při chybějícím/neshodném digestu; samotný checksum stažený ze stejného neověřeného endpointu chrání před poškozením, ne před kompromitovaným účtem.
+4. **Jedním klikem self-update odložit do samostatné verze.** WebUI běží jako root a `funpkg` přepisuje soubory pod běžící službou; smíšené staré/nové assety mohou způsobit přesně chyby tras. Update supervisor musí být oddělený proces mimo WebUI, po potvrzení zastavit službu, zálohovat konfiguraci i kompletní aktuální payload podle `funpkg` manifestu, spustit `funpkg -u`/`-i`, znovu nastartovat a provést lokální `/api/health` kontrolu s očekávanou verzí. Při selhání vrátit předchozí payload, obnovit konfigurační soubor a ověřit návrat služby. Přerušení napájení mezi stop/install/start musí být řešeno boot-time recovery markerem a transakčním journalem.
+5. Před implementací je nutné na target NASu ověřit `funpkg` metadata/rollback semantics, volné místo, umístění stagingu a backup restore. Aktualizace nikdy nesmí vymazat `/ffp/etc/ffp-webui/config.json` ani user data; první dodávka má pouze zkontrolovat release a nabídnout ověřený `.txz` ke stažení, ruční instalaci ponechat přes `funpkg`.
+
+### Závěr proof-of-conceptu
+
+Současný balík rozkládá soubory pod několik cest `/ffp/bin`, `/ffp/start`, `/ffp/etc` a `/ffp/share`; `.txz` tedy nelze jako celek vyměnit jediným atomickým `rename`. Shellový supervisor může být bezpečnější než přímá instalace z běžící WebUI, ale přesné řešení je **rollbackovatelné, ne atomické**: nejdřív ověřit checksum a obsah, rozbalit do stejného persistovaného filesystému, zapsat journal a recovery marker, zastavit službu, zálohovat její payload a konfiguraci, spustit potvrzený příkaz `funpkg`, restartovat a ověřit lokální health/version. Marker se smaže až po úspěchu; při startu NASu supervisor nejprve obnoví nedokončenou transakci. Neimplementovat ani nespouštět, dokud na cíli nejsou ověřeny přesná sémantika `funpkg -u`/`-i`, vlastnictví souborů, seznam instalovaných souborů a bezpečný restore.
+
+Repozitář i veřejný endpoint Releases jsou nyní dostupné; v0.8.0 je prerelease, nikoli ověřená stabilní verze. Samotná dostupnost release endpointu neznamená, že je v aplikaci zapnutá automatická kontrola nebo instalace. Před jakýmkoli updaterem zůstávají v platnosti výše uvedené požadavky na ověření a rollback na cílovém NASu.

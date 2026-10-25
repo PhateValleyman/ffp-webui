@@ -7,6 +7,8 @@ from collections import Counter
 ROOT = os.path.dirname(os.path.dirname(__file__))
 HTML_PATH = os.path.join(ROOT, 'internal', 'webui', 'assets', 'index.html')
 JS_PATH = os.path.join(ROOT, 'internal', 'webui', 'assets', 'app.js')
+BACKEND_PATH = os.path.join(ROOT, 'ffp', 'ffp', 'bin', 'ffp-webui')
+RCLONE_PATH = os.path.join(ROOT, 'ffp', 'ffp', 'bin', 'ffp_webui_rclone.py')
 
 
 class FrontendContractTests(unittest.TestCase):
@@ -16,6 +18,10 @@ class FrontendContractTests(unittest.TestCase):
             cls.html = handle.read()
         with open(JS_PATH, encoding='utf-8') as handle:
             cls.js = handle.read()
+        with open(BACKEND_PATH, encoding='utf-8') as handle:
+            cls.backend = handle.read()
+        with open(RCLONE_PATH, encoding='utf-8') as handle:
+            cls.rclone = handle.read()
 
     def test_new_fixed_controls_exist_and_ids_are_unique(self):
         ids = re.findall(r'\bid="([^"]+)"', self.html)
@@ -43,6 +49,29 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('/api/adb/run-script', self.js)
         self.assertIn("function openFilesFromTerminal()", self.js)
         self.assertIn('function saveTerminalBookmark()', self.js)
+
+    def test_rclone_remote_management_and_oauth_contracts_exist(self):
+        for endpoint in ('/api/rclone/remote', '/api/rclone/config/update',
+                         '/api/rclone/config/delete', '/api/rclone/oauth',
+                         '/api/rclone/oauth/stop'):
+            with self.subTest(endpoint=endpoint):
+                self.assertIn(endpoint, self.js)
+                self.assertIn(endpoint, self.backend)
+        self.assertIn('secret_fields', self.rclone)
+        self.assertIn('rcloneEditProfile', self.js)
+        self.assertIn('rclone authorize', self.js)
+        self.assertIn("if (clear) parameters[key] = '';", self.js)
+        self.assertIn("else if (field.value !== '') parameters[key] = field.value;", self.js)
+        self.assertIn('setInterval(refreshRcloneOAuthStatus, 5000)', self.js)
+
+    def test_panel_method_routes_and_release_mismatch_diagnostics_exist(self):
+        self.assertIn("api(`/api/adb/files?", self.js)
+        self.assertIn("api(`/api/rclone/files?", self.js)
+        self.assertIn("path == '/api/adb/files' and self.command == 'GET'", self.backend)
+        self.assertIn("path == '/api/rclone/files' and self.command == 'GET'", self.backend)
+        self.assertIn("'server_version': WEBUI_VERSION", self.backend)
+        self.assertIn('backend-version-warning', self.html)
+        self.assertIn('Cache-Control', self.backend)
 
 
 if __name__ == '__main__':

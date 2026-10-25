@@ -1493,6 +1493,7 @@ class Handler(BaseHTTPRequestHandler):
             ctype += '; charset=utf-8'
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(st.st_size))
+        self.send_header('Cache-Control', 'no-store')
         self.end_headers()
         if self.command != 'HEAD':
             f = open(path, 'rb')
@@ -2881,7 +2882,7 @@ class Handler(BaseHTTPRequestHandler):
                     def redirect_request(self, req, fp, code, msg, headers, newurl):
                         return None
                 opener = urllib.request.build_opener(NoRedirect())
-                request = urllib.request.Request(source_url, headers={'User-Agent': 'FFP-WebUI/0.7.0'})
+                request = urllib.request.Request(source_url, headers={'User-Agent': 'FFP-WebUI/' + WEBUI_VERSION})
                 with opener.open(request, timeout=45) as response:
                     length = response.headers.get('Content-Length')
                     if length and int(length) > self.app.cfg['max_package_bytes']:
@@ -3220,6 +3221,8 @@ class Handler(BaseHTTPRequestHandler):
             return write_json(self, 200, result)
         except ValueError as exc:
             return self._error(400, str(exc))
+        except RuntimeError as exc:
+            return self._error(409, str(exc)[:800])
         except Exception as exc:
             return self._error(502, str(exc)[:1000])
 
@@ -3260,6 +3263,8 @@ class Handler(BaseHTTPRequestHandler):
             return write_json(self, 200, result)
         except ValueError as exc:
             return self._error(400, str(exc))
+        except RuntimeError as exc:
+            return self._error(409, str(exc)[:800])
         except Exception as exc:
             return self._error(502, str(exc)[:1000])
 
@@ -5278,7 +5283,7 @@ def main(argv):
             raise KeyboardInterrupt()
         signal.signal(signal.SIGTERM, stop_service)
         signal.signal(signal.SIGINT, stop_service)
-        print('FFP WebUI 0.7.0 listening on %s (demo=%s, authentication=disabled)' % (cfg['listen_addr'], str(app.demo).lower()))
+        print('FFP WebUI %s listening on %s (demo=%s, authentication=disabled)' % (WEBUI_VERSION, cfg['listen_addr'], str(app.demo).lower()))
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         return 0

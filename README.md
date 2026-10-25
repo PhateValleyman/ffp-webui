@@ -1,31 +1,49 @@
-# FFP WebUI 0.7.0 — Zyxel NSA320
+# FFP WebUI 0.8.0 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Majitel ověřil Python 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; načítá potřebné moduly včetně `math`, SSL a SHA-256 a přes něj lze spustit WebUI. Verze 0.7.0 používá stejný statický runtime, nikoli nefunkční obecný odkaz `/ffp/bin/python3.13`. Nový balík WebUI 0.7.0 na NAS zatím nainstalován nebyl.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Verze 0.8.0 zatím nebyla nainstalována na NAS.
 
-Výchozí adresa je `http://192.168.1.20:8888`. Rozhraní je bez přihlášení a umožňuje správu jako root, jak majitel požaduje pro svou soukromou síť. Sestavení nic nekopíruje ani nemění na NASu.
+**Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
 
-## Co přináší 0.7.0
+## Novinky v 0.8.0
 
-- **Rclone jako součást FFP WebUI:** aplikace najde nakonfigurované remote účty, prochází obsah, nabízí průvodce podle providerů a spouští kopírování na pozadí se stavem a průběhem. Rclone RC proces se automaticky spustí jen na `127.0.0.1`; WebUI nabízí úzké, konkrétní API pro seznamy, konfiguraci, prohlížení a kopírování, nikoli otevřený obecný RC proxy. SFTP remotes se navíc zobrazí jako samostatný zdroj a mohou sloužit pro SSH terminál. Přehled architektury a ověřené verze jsou v [`references/rclone-webui-integration-research.md`](references/rclone-webui-integration-research.md); oficiální dokumentace: [Rclone Web GUI](https://rclone.org/gui/) a [Remote Control API](https://rclone.org/rc/).
-- **Dva souborové panely:** každý panel může ukazovat NAS, připojené ADB zařízení, aktivní spravovaný SSHFS mount, SFTP remote nebo jiné Rclone úložiště. K dispozici jsou hledání, řazení, výběr více položek a kopírování mezi podporovanými zdroji. Přenosy zahrnující Rclone jsou asynchronní a nemažou jiné cílové soubory; při shodě názvů může Rclone cílový soubor aktualizovat. Přímý přenos **ADB ↔ Rclone/SFTP zatím podporován není** — použijte NAS jako mezikrok. NAS/ADB archivní přenosy mohou dočasně spotřebovat místo na NASu i paměť prohlížeče.
-- **Záložky souborů:** aktuální cestu lze uložit z panelu A nebo B a později otevřít v libovolném panelu. Záložky lze upravit či smazat; podporují všechny typy panelových zdrojů. Jsou uloženy v `localStorage` právě používaného prohlížeče, ne na NASu, a obsahují jen typ zdroje, cestu a identifikátor zařízení/remote — ne hesla ani tokeny.
-- **Náhledy obrázků a videí:** náhledy jsou dostupné pro NAS, ADB, SSHFS, SFTP i Rclone. Nahraná data jednoho náhledu jsou omezena na 32 MiB. Video seek přes vzdálené ADB/Rclone může znovu stáhnout celý soubor v rámci tohoto limitu, proto jde o praktický prohlížeč menších médií, ne o streamování velkých filmů.
-- **Terminál:** až šest přepínatelných PTY relací s ANSI barvami: NAS shell, ADB shell, SSH host a SFTP remote. Akce „Terminál zde“ startuje relaci z vybrané cesty; nové tlačítko uloží složku do stejných záložek jako souborové panely. U NAS shellu se ukládá živá pracovní cesta procesu; u ADB/SSH/SFTP se cesta před uložením nabídne k potvrzení či úpravě, protože aktuální `pwd` vzdáleného interaktivního shellu nelze bezpečně a spolehlivě zjistit. Součástí je třířadá dotyková klávesnice ve stylu dodané ukázky: F1–F10, šipky, Home/End, Ctrl, Shift, Esc, Tab a Enter. Ctrl/Shift se použijí jako jednorázové modifikátory pro další znak. ADB `.sh` lze spustit po přesném potvrzení.
-- **Správa ADB:** párování, připojování a odpojování, pokročilá správa systémových i uživatelských aplikací (instalace APK, zmrazení/povolení, smazání dat a odinstalace podle možností zařízení), stažení APK i restart do podporovaných režimů. Destruktivní akce vyžadují potvrzení.
-- **Služby, prostředí, Tweaks a balíčky:** správa skriptů `/ffp/start`, autostartu, skutečného prostředí root po `bash -l`, textových shell profilů a Tweaks cronu; instalované balíčky se zjišťují přes `funpkg -q .` a katalog používá dostupný `slacker`. Před změnou souborů se vytváří zálohy podle příslušné funkce.
-- **Původní Zyxel WebUI:** odkazy na `/r49435`, `/adv` a `/admin`; volitelná pomocná obrazovka může předat údaje starému CGI přes HTTP URL. Heslo v URL může skončit v historii nebo logu; při potížích použijte přímý odkaz a přihlášení ve firmwaru.
+### Rclone remote správa a OAuth
 
-## Runtime a omezení
+- Přidávání, úprava a odebrání nakonfigurovaných remote úložišť podle seznamu providerů Rclone. Typ již existujícího remote se nemění; pro jiný typ založte nový remote.
+- Při úpravě se uložená hesla a tokeny nikdy nevracejí do prohlížeče. Prázdné citlivé pole ponechá dosavadní hodnotu, nová hodnota ji nahradí a zvláštní checkbox nastaví hodnotu na prázdný řetězec. To odstraní tajný obsah, ale ne klíč konfigurace: cílový Rclone 1.65.2 nemá novější `config/unset`, které umí klíč odebrat celý. Odebrání maže pouze konfiguraci remote, nikoli data v cloudu.
+- Průvodce pokračuje přes nativní neinteraktivní otázky Rclone. Nové OAuth status/stop metody se zjišťují za běhu. Pokud je Rclone nemá, průvodce nabídne headless postup `rclone authorize "<provider>"` na počítači s prohlížečem.
+- OAuth callback na `127.0.0.1` se nedá otevřít jako běžný odkaz z jiného zařízení, protože loopback pak označuje klienta, ne NAS. UI proto zobrazí URL a doporučí SSH tunel nebo [oficiální headless postup Rclone](https://rclone.org/remote_setup/).
+- Rclone Remote Control proces běží pouze na `127.0.0.1`; WebUI nevystavuje obecný RC proxy. Oficiální rozhraní: [Rclone RC](https://rclone.org/rc/).
 
-Startovací skript používá `/ffp/bin/python3.13-static`, který odkazuje na ověřený statický Python a nastaví CA cestu. Před startem ověřuje dostupnost `math`, `hashlib` a `ssl`. Snapshot root-login prostředí používá statický interpreter přímo, aby zaznamenal skutečné hodnoty prostředí. Starý `/ffp/bin/python3.13` odkaz se nepřepisuje. Python `curses` rozšíření není pro ANSI PTY vyžadováno; Python 3.13 modul `cgi` odstranil a WebUI jej nepoužívá.
+Cílový NAS má podle vlastníka `rclone v1.65.2-DEV`, staticky sestavené pro ARMv5 bez hard-float s Go 1.19.3. `rclone version` na jeho Linuxu 2.6.31.8 běžel. Novější OAuth status/stop metody se proto nepředpokládají: aplikace je feature-detectuje a použije fallback. Skutečné přihlášení, každý provider a dlouhé přenosy je nutné ověřit na NASu a cílovém účtu.
 
-Uživatel na cílovém NASu ověřil `rclone v1.65.2-DEV`, staticky sestavené pro ARMv5 bez hard-float s Go 1.19.3; základní `rclone version` na tomto jádře běžel. Konkrétní provider, přihlášení/OAuth, každý remote a dlouhé přenosy je třeba ověřit na cílových účtech. Některé OAuth průvodce vyžadují další autentizační krok mimo formulář WebUI.
+### Oprava chyb API tras
 
-Přenosy NAS/ADB využívají bezpečné archivy a existující limity. Přímé ADB↔Rclone kopírování není součástí této verze. SSHFS terminál potřebuje rozpoznatelný `host:/cesta` zdroj v aktivním spravovaném mountu; individuální port nebo klíč nastavený pouze pro samotný mount nemusí být přenesen do terminálu, pokud není také dostupný v SSH konfiguraci. Některé Androidy nepodporují všechny režimy restartu nebo mohou vyžadovat jiný režim odemykání.
+Backend nyní vrací verzi přes `/api/health`; statické soubory se načítají bez browser cache; při chybě 405 odpověď obsahuje požadovanou HTTP metodu, cestu a verzi serveru. WebUI zároveň zobrazí varování, pokud statická část a běžící backend pocházejí z různých vydání. To diagnostikuje a předchází chybám „Method not allowed or route not found“, jako na dodaném snímku: pravděpodobnou příčinou je starý běžící backend po výměně frontendových souborů.
 
-## Kontrola a sestavení
+Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte službu a znovu načtěte stránku:
 
-V kořeni projektu spusťte:
+```sh
+/ffp/start/ffp-webui.sh restart
+```
+
+## Zahrnuté funkce
+
+- Dva souborové panely pro NAS, ADB, aktivní SSHFS mounty, SFTP a ostatní Rclone remotes; hledání, řazení, vícenásobný výběr a podporované kopírování.
+- Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
+- Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
+- Správa ADB, služeb a autostartu, FFP prostředí, balíčků, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
+
+## Runtime a limity
+
+Startovací skript používá `/ffp/bin/python3.13-static`, který odkazuje na ověřený statický Python a nastavuje CA cestu. Před startem ověřuje `math`, `hashlib` a `ssl`. Snapshot prostředí root loginu volá statický interpreter přímo. Obecný `/ffp/bin/python3.13` se nepřepisuje. Python `curses` není pro ANSI PTY nutný; Python 3.13 odstranil `cgi` a WebUI jej nepoužívá.
+
+Změna konfigurace remote je blokována během aktivního Rclone přenosu a během jiného nedokončeného průvodce. Rclone konfigurace obsahuje přístupové údaje; export/úprava je proto omezena na provider pole a citlivé hodnoty se nezobrazují.
+
+## Kontrola aktualizací
+
+Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.8.0 je předběžné vydání, nikoli stabilní release. Případná read-only kontrola má vybírat jen stabilní vydání a ověřovat SHA-256. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
+
+## Build a lokální testy
 
 ```sh
 python3 -m py_compile ffp/ffp/bin/ffp-webui ffp/ffp/bin/ffp_webui_rclone.py
@@ -35,38 +53,25 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Testy pokrývají validaci cest Rclone a velikostní limity náhledů. Sestavení vytvoří instalační archiv `dist/ffp-webui-0.7.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `dist/ffp-webui-0.7.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.7.0-SHA256SUMS` a rozbalený náhled `dist/stage/`. Instalační `.txz` je určen pro `funpkg`; zdrojový `.tgz` se neinstaluje. Přípona `UNVERIFIED` označuje, že tento build WebUI ještě nebyl instalován a otestován na cílovém NASu.
+Build vytvoří `dist/ffp-webui-0.8.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.8.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.8.0-SHA256SUMS` a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
-Před případnou ruční instalací zkontrolujte checksum a zazálohujte `/ffp/etc/ffp-webui/config.json`:
+Před případnou ruční instalací zkontrolujte checksum a zazálohujte konfiguraci:
 
 ```sh
-cd /cesta/k
-sha256sum -c ffp-webui-0.7.0-SHA256SUMS
-funpkg -i /cesta/k/ffp-webui-0.7.0-python3.13-static-UNVERIFIED.txz
-# nebo pro již nainstalovaný balíček:
-funpkg -u /cesta/k/ffp-webui-0.7.0-python3.13-static-UNVERIFIED.txz
+cd /cesta/k/dist
+sha256sum -c ffp-webui-0.8.0-SHA256SUMS
+funpkg -i ./ffp-webui-0.8.0-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
-Demo běží ze stage, aby byly statické soubory ve správné cestě:
+Pro aktualizaci existující instalace nepoužívejte `funpkg -u`, dokud není na tomto NASu potvrzená jeho přesná sémantika a postup zálohy/obnovy konfigurace.
+
+Demo běží ze stage a používá pouze fiktivní data:
 
 ```sh
 python3 dist/stage/ffp/bin/ffp-webui --config dist/stage/ffp/etc/ffp-webui/config.json --demo
 ```
 
-Demo používá fiktivní data, nepřipojuje zařízení ani remote úložiště a odmítá změny.
-
-## GitHub Releases
-
-Po dokončení a ověření nové verze ji vydejte verzovaným tagem ve formátu `vX.Y.Z`, například:
-
-```sh
-git tag v0.8.0
-git push origin v0.8.0
-```
-
-GitHub Actions po pushi tagu spustí statické kontroly, regresní testy a sestavení. Pokud vše projde, vytvoří veřejný GitHub Release s instalačním souborem `ffp-webui-X.Y.Z-python3.13-static-UNVERIFIED.txz` a kontrolním součtem SHA-256. Přípona `UNVERIFIED` zůstává, dokud daný balík není ověřen na cílovém NASu. Tagujte pouze hotovou verzi; běžný commit ani dosud nedokončená verze release nevytvoří.
-
 ## Stav ověření
 
-Nový balík 0.7.0 nebyl na NAS nainstalován; server ani nastavení NASu tímto úkolem nebyly změněny. Ověřeno je lokální sestavení, statická kontrola Pythonu/JavaScriptu, regresní testy a lokální demo HTTP smoke test po sestavení. Po případném nasazení zbývá na cíli ověřit službu po restartu/upgrade, konkrétní Rclone provider a OAuth, přenosy s reálnými zdroji, SSHFS terminál a ADB operace.
+Sestavení, syntaxe a regresní testy se ověřují lokálně, stejně jako HTTP smoke test stage buildu. Verze 0.8.0 je publikována jako GitHub prerelease, ale její instalační balík nebyl nainstalován ani spuštěn na NAS; NAS nebyl tímto úkolem změněn. Před nasazením ověřte konkrétní provider, OAuth průběh a přenosy na cílovém Rclone účtu. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.

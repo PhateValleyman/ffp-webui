@@ -419,7 +419,8 @@ class RcloneBridge(object):
         if not isinstance(option, dict):
             return None
         is_password = bool(option.get('IsPassword', option.get('isPassword', False)))
-        default = '' if is_password else option.get('DefaultStr', option.get('Default', option.get('default', '')))
+        is_sensitive = bool(option.get('Sensitive', option.get('sensitive', False)))
+        default = '' if is_password or is_sensitive else option.get('DefaultStr', option.get('Default', option.get('default', '')))
         examples = []
         for example in option.get('Examples', option.get('examples', [])) or []:
             if isinstance(example, dict):
@@ -430,7 +431,8 @@ class RcloneBridge(object):
                 'type': str(option.get('Type', option.get('type', 'string'))).lower(),
                 'default': '' if default is None else str(default),
                 'required': bool(option.get('Required', option.get('required', False))),
-                'password': is_password,
+                'password': is_password or is_sensitive,
+                'sensitive': is_sensitive,
                 'exclusive': bool(option.get('Exclusive', option.get('exclusive', False))),
                 'examples': examples}
 
@@ -512,6 +514,10 @@ class RcloneBridge(object):
         if self.transfer_guard.locked():
             raise RuntimeError('Wait for active Rclone transfers before editing remote configuration')
         with self.config_lock:
+            if self.transfer_guard.locked():
+                raise RuntimeError('Wait for active Rclone transfers before editing remote configuration')
+            if self.config_sessions:
+                raise RuntimeError('Finish or cancel the pending Rclone configuration first')
             config = self.remote_config(name)
             remote_type = str(config.get('type', config.get('Type', '')))
             requested_type = request.get('type', remote_type)
@@ -528,6 +534,8 @@ class RcloneBridge(object):
         if self.transfer_guard.locked():
             raise RuntimeError('Wait for active Rclone transfers before deleting a remote')
         with self.config_lock:
+            if self.transfer_guard.locked():
+                raise RuntimeError('Wait for active Rclone transfers before deleting a remote')
             if self.config_sessions:
                 raise RuntimeError('Finish or cancel the pending Rclone configuration first')
             if name not in self.remote_names():
@@ -648,6 +656,14 @@ class RcloneBridge(object):
         return os.path.join(base, child) if child else base
 
     def start_copy(self, request):
+        with self.config_lock:
+            if self.config_sessions:
+                raise RuntimeError('Finish or cancel the pending Rclone configuration first')
+            if self.transfer_guard.locked():
+                raise RuntimeError('Another rclone transfer is already running')
+            return self._start_copy_locked(request)
+
+    def _start_copy_locked(self, request):
         if not isinstance(request, dict):
             raise ValueError('Invalid copy request')
         source = self._descriptor(request.get('source'))

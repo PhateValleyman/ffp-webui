@@ -9,6 +9,8 @@ let accountData = null;
 let editingUser = null;
 let passwordUser = '';
 let toastTimer;
+const FRONTEND_VERSION = '0.8.0';
+let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
 function setTheme(theme, persist = true) {
@@ -50,7 +52,14 @@ async function api(path, options = {}) {
     });
     const type = response.headers.get('content-type') || '';
     const data = type.includes('application/json') ? await response.json() : await response.text();
-    if (!response.ok) throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 405 && path.startsWith('/api/')) {
+        const requestPath = new URL(path, location.href).pathname;
+        const server = data?.server_version || backendVersion || 'neznámá';
+        throw new Error(`API nenalezlo ${method} ${requestPath} (backend ${server}, UI ${FRONTEND_VERSION}). Zkontrolujte shodu verzí a restartujte službu.`);
+      }
+      throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+    }
     return data;
   } catch (error) {
     if (controller?.signal.aborted) throw new Error(`Server neodpověděl do ${Math.ceil(timeoutMs / 1000)} sekund.`);
@@ -61,6 +70,22 @@ async function api(path, options = {}) {
 }
 function post(path, data) {
   return api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+}
+async function checkBackendVersion() {
+  const warning = $('#backend-version-warning');
+  try {
+    const health = await api('/api/health');
+    backendVersion = String(health.version || '');
+    if (backendVersion !== FRONTEND_VERSION) {
+      warning.textContent = `Nesouhlasí verze rozhraní a serveru (UI ${FRONTEND_VERSION}, backend ${backendVersion || 'neznámý'}). Po instalaci balíku restartujte /ffp/start/ffp-webui.sh; do té doby mohou některé API trasy selhávat.`;
+      warning.hidden = false;
+    } else {
+      warning.hidden = true;
+    }
+  } catch (_) {
+    warning.textContent = 'Verzi běžícího backendu nelze ověřit. Pokud se zobrazí chyba API trasy, zkontrolujte, zda po aktualizaci běží server ze stejného balíku jako statické soubory.';
+    warning.hidden = false;
+  }
 }
 function node(tag, text, className) {
   const el = document.createElement(tag);
@@ -990,6 +1015,8 @@ let adbKnownDevices = [];
 let rcloneKnownRemotes = [];
 let rcloneProviderCache = [];
 let rcloneConfigSession = '';
+let rcloneEditProfile = null;
+let rcloneOAuthPollTimer = null;
 let sshfsKnownMounts = [];
 function joinPanelPath(path, name) { return `${path === '/' ? '' : path}/${name}` || '/'; }
 function panelEntryPath(side, entry) { return entry.path || joinPanelPath(dualFiles[side].path, entry.name); }
@@ -1273,7 +1300,27 @@ async function loadRcloneRemotes() {
     $('#rclone-connect').disabled = !status.available || !!data.demo;
     list.replaceChildren();
     if (!rcloneKnownRemotes.length) list.append(node('div', 'Zatím nejsou nakonfigurovaná žádná rclone úložiště.', 'muted'));
-    for (const remote of rcloneKnownRemotes) list.append(node('span', `${remote.kind === 'sftp' ? 'SFTP' : 'rclone'} · ${remote.name}`, 'rclone-remote-chip'));
+    const names = new Set(rcloneKnownRemotes.map(remote => remote.name));
+    for (const side of ['left', 'right']) {
+      const state = dualFiles[side];
+      if (['rclone', 'sftp'].includes(state.source) && !names.has(state.remote)) {
+        state.source = 'nas'; state.remote = ''; state.path = '/'; state.selected.clear();
+      }
+    }
+    for (const remote of rcloneKnownRemotes) {
+      const row = node('div', undefined, 'rclone-remote-row');
+      const info = node('div', undefined, 'rclone-remote-info');
+      info.append(node('strong', `${remote.kind === 'sftp' ? 'SFTP' : 'rclone'} · ${remote.name}`));
+      info.append(node('small', remote.type || 'typ nezjištěn', 'muted'));
+      const actions = node('div', undefined, 'actions');
+      const edit = node('button', 'Upravit', 'button button-quiet');
+      edit.type = 'button'; edit.disabled = !!data.demo;
+      edit.addEventListener('click', () => openRcloneConfig(remote.name));
+      const remove = node('button', 'Odebrat', 'button button-danger');
+      remove.type = 'button'; remove.disabled = !!data.demo;
+      remove.addEventListener('click', () => deleteRcloneRemote(remote.name));
+      actions.append(edit, remove); row.append(info, actions); list.append(row);
+    }
     refreshFileSources(); refreshTerminalTargets();
   } catch (error) {
     rcloneKnownRemotes = [];
@@ -1282,63 +1329,145 @@ async function loadRcloneRemotes() {
   }
 }
 $('#rclone-refresh').addEventListener('click', loadRcloneRemotes);
-$('#rclone-connect').addEventListener('click', openRcloneConfig);
+$('#rclone-connect').addEventListener('click', () => openRcloneConfig());
 function rcloneSelectedProvider() { return rcloneProviderCache.find(provider => provider.name === $('#rclone-config-provider').value); }
 function renderRcloneProviderFields() {
-  const box = $('#rclone-config-fields'); box.replaceChildren();
+  const box = $('#rclone-config-fields');
+  const previous = new Map([...box.querySelectorAll('[data-rclone-option]')].map(field => [field.dataset.rcloneOption, field.value]));
+  const cleared = new Set([...box.querySelectorAll('[data-rclone-clear]:checked')].map(field => field.dataset.rcloneClear));
+  box.replaceChildren();
   const provider = rcloneSelectedProvider(); if (!provider) return;
   for (const option of provider.options || []) {
     if (option.advanced && !$('#rclone-config-advanced').checked) continue;
-    const label = node('label', option.name + (option.required ? ' *' : ''));
+    const hasValue = Object.prototype.hasOwnProperty.call(rcloneEditProfile?.values || {}, option.name);
+    const storedValue = hasValue ? String(rcloneEditProfile.values[option.name]) : '';
+    const hasSecret = (rcloneEditProfile?.secret_fields || []).includes(option.name);
+    const isSecret = !!(option.password || option.sensitive);
+    const initial = hasValue ? storedValue : (option.default || '');
+    const label = node('label', option.name + (option.required && !(isSecret && hasSecret) ? ' *' : ''));
     if (option.help) label.title = option.help;
     let field;
     if (option.exclusive && option.examples?.length) {
       field = node('select');
       if (!option.required) field.add(new Option('— vyberte —', ''));
       for (const example of option.examples) field.add(new Option(example.value + (example.help ? ' · ' + example.help : ''), example.value));
-      if (option.default) field.value = option.default;
+      if (initial && ![...field.options].some(item => item.value === initial)) field.add(new Option(initial, initial));
+      field.value = initial;
     } else if (['bool','boolean'].includes(option.type)) {
       field = node('select'); field.add(new Option('Ano', 'true')); field.add(new Option('Ne', 'false'));
-      if (option.default !== '') field.value = option.default === 'true' ? 'true' : 'false';
-    } else if (option.password) {
+      if (initial !== '') field.value = initial === 'true' ? 'true' : 'false';
+    } else if (isSecret) {
       field = node('input'); field.type = 'password'; field.autocomplete = 'new-password';
     } else if (['token','credentials_json'].includes(option.name.toLowerCase())) {
-      field = node('textarea'); field.rows = 3; field.spellcheck = false;
+      field = node('textarea'); field.rows = 3; field.spellcheck = false; field.autocomplete = 'off';
     } else {
       field = node('input'); field.type = 'text'; field.autocomplete = 'off';
     }
     field.dataset.rcloneOption = option.name;
-    if (option.required) field.required = true;
-    if (field.tagName !== 'SELECT' && option.default) field.value = option.default;
+    field.dataset.rcloneInitial = initial;
+    field.dataset.rcloneSecret = String(isSecret);
+    field.dataset.rcloneHasSecret = String(hasSecret);
+    if (option.required && !(isSecret && hasSecret)) field.required = true;
+    field.value = previous.has(option.name) ? previous.get(option.name) : (isSecret && rcloneEditProfile ? '' : initial);
     if (option.help) field.setAttribute('aria-label', option.help);
     label.append(field);
     if (option.help) label.append(node('small', option.help, 'muted'));
     label.classList.add('rclone-config-field');
     if (option.advanced) label.classList.add('rclone-field-advanced');
     box.append(label);
+    if (isSecret && rcloneEditProfile && hasSecret) {
+      const clearLabel = node('label', 'Vymazat hodnotu (uložit prázdný řetězec)', 'check-label rclone-clear-secret');
+      const clear = node('input'); clear.type = 'checkbox'; clear.dataset.rcloneClear = option.name;
+      clear.checked = cleared.has(option.name); clearLabel.prepend(clear);
+      box.append(clearLabel);
+    } else if (isSecret && rcloneEditProfile) {
+      box.append(node('small', 'Nová hodnota se uloží; prázdné pole ponechá nastavení beze změny.', 'muted rclone-secret-note'));
+    }
   }
 }
-async function openRcloneConfig() {
+async function openRcloneConfig(name = '') {
   try {
-    const data = await api('/api/rclone/providers');
+    const requests = [api('/api/rclone/providers')];
+    if (name) requests.push(api('/api/rclone/remote?name=' + encodeURIComponent(name)));
+    const [data, profile] = await Promise.all(requests);
     if (!data.available) throw new Error(data.error || 'Seznam typů úložišť není dostupný.');
     rcloneProviderCache = data.providers || [];
     const select = $('#rclone-config-provider'); select.replaceChildren(new Option('Vyberte typ úložiště', ''));
     for (const provider of rcloneProviderCache) select.add(new Option(provider.name + (provider.description ? ' · ' + provider.description : ''), provider.name));
     if (!rcloneProviderCache.length) throw new Error('Rclone nevrátil žádné typy úložišť.');
+    rcloneEditProfile = profile || null;
     rcloneConfigSession = ''; $('#rclone-config-main').hidden = false; $('#rclone-config-question').hidden = true;
-    $('#rclone-config-name').value = ''; $('#rclone-config-advanced').checked = false;
-    $('#rclone-config-note').textContent = 'Citlivé hodnoty se do auditního záznamu neukládají. OAuth přihlašovací callback pro vzdálený prohlížeč není ověřen.';
+    $('#rclone-oauth-status').hidden = true; $('#rclone-oauth-status').replaceChildren();
+    $('#rclone-config-name').value = profile?.name || ''; $('#rclone-config-name').readOnly = !!profile;
+    select.value = profile?.type || ''; select.disabled = !!profile;
+    $('#rclone-config-title').textContent = profile ? `Upravit úložiště ${profile.name}` : 'Připojit úložiště';
+    $('#rclone-config-submit').textContent = profile ? 'Uložit změny' : 'Připojit';
+    $('#rclone-config-advanced').checked = false;
+    const note = $('#rclone-config-note'); note.className = 'notice notice-info';
+    note.textContent = profile
+      ? 'Citlivé hodnoty se nikdy nevracejí do prohlížeče. Uložené tajné pole ponechte prázdné pro zachování, nebo zadejte náhradu.'
+      : 'Citlivé hodnoty se ukládají pouze do rclone konfigurace a nevracejí se zpět do prohlížeče.';
     renderRcloneProviderFields(); $('#rclone-config-dialog').showModal();
+  } catch (error) { toast(error.message, true); }
+}
+async function deleteRcloneRemote(name) {
+  const phrase = `DELETE RCLONE REMOTE ${name}`;
+  if (prompt(`Odebere pouze konfiguraci remote „${name}“, nikoli soubory v cloudu. Pro potvrzení zadejte přesně:\n${phrase}`) !== phrase) return;
+  try {
+    await post('/api/rclone/config/delete', { name, confirm: phrase });
+    toast(`Konfigurace remote ${name} byla odebrána.`);
+    await loadRcloneRemotes(); await Promise.all(['left', 'right'].map(side => loadDualPanel(side)));
   } catch (error) { toast(error.message, true); }
 }
 $('#rclone-config-provider').addEventListener('change', renderRcloneProviderFields);
 $('#rclone-config-advanced').addEventListener('change', renderRcloneProviderFields);
-$('#rclone-config-close').addEventListener('click', () => $('#rclone-config-dialog').close());
-$('#rclone-config-cancel').addEventListener('click', async () => {
+async function closeRcloneConfig() {
+  if (rcloneOAuthPollTimer) clearInterval(rcloneOAuthPollTimer);
+  rcloneOAuthPollTimer = null;
   if (rcloneConfigSession) { try { await post('/api/rclone/config/cancel', { session_id: rcloneConfigSession }); } catch (_) {} }
-  rcloneConfigSession = ''; $('#rclone-config-dialog').close();
-});
+  rcloneConfigSession = ''; rcloneEditProfile = null;
+  $('#rclone-config-dialog').close();
+}
+$('#rclone-config-close').addEventListener('click', closeRcloneConfig);
+$('#rclone-config-cancel').addEventListener('click', closeRcloneConfig);
+$('#rclone-config-dialog').addEventListener('cancel', event => { event.preventDefault(); closeRcloneConfig(); });
+async function refreshRcloneOAuthStatus() {
+  const box = $('#rclone-oauth-status');
+  try {
+    const status = await api('/api/rclone/oauth');
+    if (!status.supported) {
+      if (rcloneOAuthPollTimer) clearInterval(rcloneOAuthPollTimer); rcloneOAuthPollTimer = null;
+      box.hidden = false; box.className = 'notice notice-info';
+      box.textContent = 'Tato verze rclone nemá nový OAuth status endpoint. Pro bezobslužný NAS zvolte v průvodci „Ne“ u místního prohlížeče a použijte rclone authorize na počítači s prohlížečem.';
+      return status;
+    }
+    if (status.status !== 'running' || !status.auth_url) {
+      if (rcloneOAuthPollTimer) clearInterval(rcloneOAuthPollTimer); rcloneOAuthPollTimer = null;
+      box.hidden = true; box.replaceChildren(); return status;
+    }
+    box.hidden = false; box.className = 'notice notice-warning rclone-oauth-box'; box.replaceChildren();
+    box.append(node('strong', 'OAuth čeká na autorizaci.'));
+    box.append(node('p', 'Odkaz používá loopback callback. Z jiného zařízení otevření 127.0.0.1 nevede na NAS; použijte SSH tunel nebo postup rclone authorize.'));
+    const code = node('code', status.auth_url, 'rclone-oauth-url'); box.append(code);
+    const copy = node('button', 'Kopírovat odkaz', 'button button-quiet'); copy.type = 'button';
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(status.auth_url); toast('OAuth odkaz zkopírován.'); }
+      catch (_) { toast('Odkaz označte a zkopírujte ručně.', true); }
+    });
+    box.append(copy);
+    const stop = node('button', 'Zastavit OAuth čekání', 'button button-quiet'); stop.type = 'button';
+    stop.addEventListener('click', async () => {
+      try { await post('/api/rclone/oauth/stop', {}); toast('OAuth čekání bylo ukončeno.'); await refreshRcloneOAuthStatus(); }
+      catch (error) { toast(error.message, true); }
+    });
+    box.append(stop);
+    box.append(node('small', `Přes SSH: ssh -L 53682:localhost:53682 uzivatel@${location.hostname} · poté otevřete odkaz v prohlížeči tohoto počítače.`, 'muted'));
+    return status;
+  } catch (error) {
+    box.hidden = false; box.className = 'notice notice-warning'; box.textContent = `OAuth stav nelze načíst: ${error.message}`;
+    return null;
+  }
+}
 function showRcloneQuestion(result) {
   const question = result.option; const box = $('#rclone-config-question'); box.replaceChildren();
   $('#rclone-config-main').hidden = true; box.hidden = false; rcloneConfigSession = result.session_id || '';
@@ -1349,17 +1478,35 @@ function showRcloneQuestion(result) {
   $('#rclone-config-submit').disabled = false;
   box.append(node('h3', question.name));
   if (question.help) box.append(node('p', question.help, 'muted'));
+  if (question.name === 'config_is_local') {
+    box.append(node('p', 'NAS nemá běžný desktopový prohlížeč. Pro cílové zařízení je obvykle vhodnější „Ne“; následně spusťte rclone authorize na počítači s prohlížečem a vložte vrácený token.', 'notice notice-info'));
+  }
+  if (/token|credentials_json/i.test(question.name)) {
+    const provider = rcloneEditProfile?.type || rcloneSelectedProvider()?.name || '';
+    box.append(node('p', `Tento údaj může být OAuth token nebo JSON přihlašovací blob; nezveřejňuje se v auditním záznamu. Na počítači s prohlížečem použijte rclone authorize "${provider}" (nejlépe stejnou verzi Rclone) a vložte celý výstup.`, 'notice notice-info'));
+  }
   let field;
   if (question.exclusive && question.examples?.length) {
     field = node('select'); if (!question.required) field.add(new Option('— vyberte —', ''));
     for (const example of question.examples) field.add(new Option(example.value + (example.help ? ' · ' + example.help : ''), example.value));
   } else if (['bool','boolean'].includes(question.type)) {
     field = node('select'); field.add(new Option('Ano', 'true')); field.add(new Option('Ne', 'false'));
-  } else if (question.password) { field = node('input'); field.type = 'password'; field.autocomplete = 'new-password'; }
+    if (question.name === 'config_is_local' && !question.default) field.value = 'false';
+  } else if (/token|credentials_json/i.test(question.name)) { field = node('input'); field.type = 'password'; field.autocomplete = 'new-password'; field.maxLength = 8192; }
+  else if (question.password) { field = node('input'); field.type = 'password'; field.autocomplete = 'new-password'; }
   else { field = node('input'); field.type = 'text'; field.autocomplete = 'off'; }
-  field.id = 'rclone-question-answer'; field.value = question.default || ''; field.required = !!question.required;
+  field.id = 'rclone-question-answer';
+  field.value = question.name === 'config_is_local' && ['bool','boolean'].includes(question.type) ? 'false' : (question.default || '');
+  field.required = !!question.required;
   box.append(field);
-  $('#rclone-config-note').textContent = result.error || 'Rclone požaduje doplňující údaj pro dokončení konfigurace.';
+  const note = $('#rclone-config-note'); note.className = result.error ? 'notice notice-warning' : 'notice notice-info';
+  note.textContent = result.error || 'Rclone požaduje doplňující údaj pro dokončení konfigurace.';
+  refreshRcloneOAuthStatus().then(status => {
+    if (status?.supported && status.status === 'running') {
+      if (rcloneOAuthPollTimer) clearInterval(rcloneOAuthPollTimer);
+      rcloneOAuthPollTimer = setInterval(refreshRcloneOAuthStatus, 5000);
+    }
+  });
 }
 $('#rclone-config-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1376,12 +1523,24 @@ $('#rclone-config-form').addEventListener('submit', async event => {
       if (!provider || !form.reportValidity()) { button.disabled = false; return; }
       const parameters = {};
       for (const field of $('#rclone-config-fields').querySelectorAll('[data-rclone-option]')) {
-        if (field.value !== '') parameters[field.dataset.rcloneOption] = field.value;
+        const key = field.dataset.rcloneOption;
+        const clear = $('#rclone-config-fields').querySelector(`[data-rclone-clear="${key}"]`)?.checked;
+        if (field.dataset.rcloneSecret === 'true') {
+          if (clear) parameters[key] = '';
+          else if (field.value !== '') parameters[key] = field.value;
+        } else if (!rcloneEditProfile || field.value !== field.dataset.rcloneInitial) {
+          parameters[key] = field.value;
+        }
       }
-      result = await post('/api/rclone/config/create', { name, type: provider.name, parameters });
+      result = rcloneEditProfile
+        ? await post('/api/rclone/config/update', { name, type: provider.name, parameters })
+        : await post('/api/rclone/config/create', { name, type: provider.name, parameters });
     }
     if (result.complete) {
-      rcloneConfigSession = ''; $('#rclone-config-dialog').close(); toast(`Úložiště ${result.remote} připojeno.`); await loadRcloneRemotes();
+      if (rcloneOAuthPollTimer) clearInterval(rcloneOAuthPollTimer); rcloneOAuthPollTimer = null;
+      const updated = result.action === 'update' || !!rcloneEditProfile;
+      rcloneConfigSession = ''; rcloneEditProfile = null; $('#rclone-config-dialog').close();
+      toast(updated ? `Úložiště ${result.remote} upraveno.` : `Úložiště ${result.remote} připojeno.`); await loadRcloneRemotes();
     } else if (result.session_id) showRcloneQuestion(result);
     else throw new Error(result.error || 'Rclone konfiguraci nedokončil.');
   } catch (error) {
@@ -2364,5 +2523,5 @@ async function refreshView(name) {
   if (name === 'cron') return loadCron();
   if (name === 'adb') return loadAdb();
 }
-async function initial() { await loadOverview(); }
+async function initial() { await Promise.all([loadOverview(), checkBackendVersion()]); }
 initial();
