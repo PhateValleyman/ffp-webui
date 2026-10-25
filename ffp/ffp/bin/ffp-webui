@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.10.0'
+WEBUI_VERSION = '0.11.0'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -87,6 +87,8 @@ MAX_ARCHIVE_MEMBER = 536870912
 MAX_MEDIA_PREVIEW_BYTES = 33554432
 LOGIN_RE = re.compile(r'^[a-z_][a-z0-9_-]{0,31}$')
 GROUP_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}$')
+ZYPKG_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$')
+ZYPKG_VERSION_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$')
 SSHD_CONFIG_PATH = '/ffp/etc/ssh/sshd_config'
 SSH_CONFIG_PATH = '/ffp/etc/ssh/ssh_config'
 SSHD_BINARY = '/ffp/sbin/sshd'
@@ -1659,6 +1661,16 @@ class Handler(BaseHTTPRequestHandler):
             if not self.app.require_live(self):
                 return
             return self.adb_archive_upload()
+        if path == '/api/zypkg' and self.command == 'GET':
+            return self.zypkg_query()
+        if path == '/api/zypkg/action' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.zypkg_action()
+        if path == '/api/zypkg/update-list' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.zypkg_update_list()
         if path == '/api/adb/copy' and self.command == 'POST':
             if not self.app.require_live(self):
                 return
@@ -2987,6 +2999,100 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, str(exc))
         except Exception:
             return self._error(502, 'Package upload failed')
+
+    def zypkg_cli(self, command, timeout=45):
+        zysh = command_path('zysh')
+        if not zysh:
+            raise RuntimeError('zysh is unavailable; Zypkg cannot be queried')
+        return run_fixed([zysh, '-e', command], timeout)
+
+    def zypkg_query(self):
+        params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        view_values = params.pop('view', [])
+        if len(view_values) != 1 or params.keys() - {'name', 'group'}:
+            return self._error(400, 'Provide one supported Zypkg query view')
+        view = view_values[0]
+        commands = {
+            'all': 'zy-pkgs query all',
+            'newver': 'zy-pkgs query newver',
+            'status': 'zy-pkgs query status',
+            'built-in': 'zy-pkgs query built-in',
+            'freespace': 'zy-pkgs query freespace',
+            'progress': 'zy-pkgs update-list showProgress',
+        }
+        if view in ('package', 'group'):
+            field = 'name' if view == 'package' else 'group'
+            values = params.pop(field, [])
+            if params or len(values) != 1:
+                return self._error(400, 'Provide exactly one Zypkg package or group name')
+            pattern = ZYPKG_NAME_RE if view == 'package' else GROUP_RE
+            if not pattern.fullmatch(values[0]):
+                return self._error(400, 'Invalid Zypkg package or group name')
+            command = 'zy-pkgs query "%s"' % values[0] if view == 'package' else 'zy-pkgs query group "%s"' % values[0]
+        else:
+            if params or view not in commands:
+                return self._error(400, 'Unsupported Zypkg query view')
+            command = commands[view]
+        if self.app.demo:
+            return write_json(self, 200, {'available': False, 'demo': True, 'view': view,
+                'command': command, 'output': '', 'error': 'Demo mode does not query NAS packages.'})
+        try:
+            output = self.zypkg_cli(command)
+            return write_json(self, 200, {'available': True, 'demo': False, 'view': view,
+                'command': command, 'output': output, 'error': ''})
+        except Exception as exc:
+            return write_json(self, 200, {'available': False, 'demo': False, 'view': view,
+                'command': command, 'output': '', 'error': str(exc)[:500]})
+
+    def zypkg_action(self):
+        req = self.app.read_json(self, 4096)
+        if set(req) != {'action', 'name', 'version', 'confirm'}:
+            return self._error(400, 'Zypkg action requires action, name, version, and confirm')
+        action, name, version = req.get('action'), req.get('name'), req.get('version')
+        if not isinstance(name, str) or not ZYPKG_NAME_RE.fullmatch(name):
+            return self._error(400, 'Invalid Zypkg package name')
+        if not isinstance(version, str):
+            return self._error(400, 'Invalid Zypkg package version')
+        if action in ('install', 'uninstall'):
+            if not ZYPKG_VERSION_RE.fullmatch(version):
+                return self._error(400, 'Install and uninstall require a safe package version')
+            expected = '%s %s %s' % (action.upper(), name, version)
+            if action == 'install':
+                command = 'zy-pkgs install "%s" %s' % (name, version)
+            else:
+                command = 'zy-pkgs uninstall "%s" "%s"' % (name, version)
+        elif action in ('update', 'enable', 'disable'):
+            if version:
+                return self._error(400, 'This Zypkg action does not accept a package version')
+            expected = '%s %s' % (action.upper(), name)
+            command = 'zy-pkgs %s "%s"' % (action, name)
+        else:
+            return self._error(400, 'Unsupported Zypkg action')
+        if req.get('confirm') != expected:
+            return self._error(400, 'Exact Zypkg action confirmation required')
+        try:
+            job = self.app.start_job('zy-pkgs ' + action + ' ' + name,
+                lambda: self.zypkg_cli(command, self.app.cfg['operation_timeout_seconds']))
+        except Exception as exc:
+            return self._error(409, str(exc)[:300])
+        self.app.audit(self, 'zypkg_' + action, name, 'started')
+        req.clear()
+        return write_json(self, 202, job)
+
+    def zypkg_update_list(self):
+        req = self.app.read_json(self, 4096)
+        confirm = 'UPDATE ZYPKG LISTS'
+        if set(req) != {'confirm'} or req.get('confirm') != confirm:
+            return self._error(400, 'Exact Zypkg list-update confirmation required')
+        command = 'zy-pkgs update-list start'
+        try:
+            job = self.app.start_job('zy-pkgs update-list start',
+                lambda: self.zypkg_cli(command, self.app.cfg['operation_timeout_seconds']))
+        except Exception as exc:
+            return self._error(409, str(exc)[:300])
+        self.app.audit(self, 'zypkg_update_list', 'repository indexes', 'started')
+        req.clear()
+        return write_json(self, 202, job)
 
     def package_fetch(self):
         if not self.app.require_live(self):

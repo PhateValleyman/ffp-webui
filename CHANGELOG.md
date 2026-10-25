@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0 — 2026-10-25
+
+- Přidána samostatná správa Zypkg přes lokální `zysh -e`: čtecí dotazy ukazují původní výstup firmwaru; instalace, aktualizace, povolení/zakázání a odebrání používají pouze pevný seznam příkazů a vyžadují přesné potvrzení.
+- FFP `funpkg` a `slacker` zůstávají oddělené. WebUI nevolá `zysh-cgi`, neprovádí automatické změny Zypkg a nepředstírá parsování neověřeného formátu katalogu.
+- Během vývoje byly ověřeny pouze dostupné read-only příkazy na cílovém NSA320; žádná Zypkg instalace, aktualizace, změna stavu ani odebrání nebyly spuštěny. Mutující operace v rozhraní proto nebyly na NASu ověřeny.
+
 ## 0.10.0 — 2026-10-25
 
 - Karta Balíčky odlišuje nativní Zypkg správu od FFP `funpkg`/`slacker` a nabízí přímé odkazy na dvě stránky firmware Zyxel. Volání neověřeného CGI protokolu není povoleno; instalaci Zypkg dál provádí firmware.

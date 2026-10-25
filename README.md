@@ -1,8 +1,14 @@
-# FFP WebUI 0.10.0 — Zyxel NSA320
+# FFP WebUI 0.11.0 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.11.0
+
+- Karta **Balíčky** nyní zobrazuje skutečné výstupy `zy-pkgs query all`, `newver`, `status`, `built-in` a `freespace`; lze se také zeptat na konkrétní balíček nebo skupinu. Výstup se zobrazuje jako text firmwaru, protože jeho přesný formát není cílově ověřen.
+- Přidány potvrzované operace Zypkg **instalovat, aktualizovat, povolit, zakázat a odebrat**, plus ruční obnovení seznamu repozitáře. Backend používá pouze `zysh -e` a pevný whitelist příkazů; nevolá `zysh-cgi` ani obecný shell. Zypkg je oddělené od FFP `funpkg`/`slacker` i od automatického aktualizátoru FFP-WebUI.
+- Cílové read-only příkazy jsou ověřené; žádná instalace, aktualizace, změna povolení/zakázání ani odebrání nebyly při této práci provedeny na NASu. Před první mutující operací doporučujeme nejprve zkontrolovat výstupy a ověřit chování na testovacím zařízení; závislosti ani rollback WebUI neřeší.
 
 ## Novinky v 0.10.0
 
@@ -71,7 +77,7 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 - Dva souborové panely pro NAS, ADB, aktivní SSHFS mounty, SFTP a ostatní Rclone remotes; hledání, řazení, vícenásobný výběr a podporované kopírování.
 - Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
 - Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
-- Správa ADB, služeb a autostartu, FFP prostředí, FFP balíčků (`funpkg`/`slacker`), odkazy na nativní Zypkg obrazovky, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
+- Správa ADB, služeb a autostartu, FFP prostředí a balíčků (`funpkg`/`slacker`), Zypkg přes oddělený správce firmwaru, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
 - Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0; cesty opraveny v 0.9.1; účet root povolen v 0.9.2; výpis modů opraven v 0.9.3; mapování ID her opraveno v 0.9.4; root uživatelská cesta povolena v 0.9.5).
 
 ## Runtime a limity
@@ -96,14 +102,14 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.10.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.10.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.10.0-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage-0.10.0/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.11.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.11.0-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.11.0/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
-Ruční instalace je určena pro přechod z verze bez aktualizátoru (například v0.9.5), pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.10.0](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.10.0) README, instalátor `ffp-webui-0.10.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.10.0-source.tgz` a manifest `ffp-webui-0.10.0-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
+Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.11.0](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.11.0) README, instalátor `ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.11.0-source.tgz` a manifest `ffp-webui-0.11.0-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
 
 ```sh
 cd /cesta/k/prenesenym-souborum
-sha256sum -c ffp-webui-0.10.0-SHA256SUMS
-funpkg -i ./ffp-webui-0.10.0-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.11.0-SHA256SUMS
+funpkg -i ./ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -114,9 +120,9 @@ Na cílovém NASu bylo ověřeno, že `funpkg -u <nový-archiv>` vrací „Not i
 Demo běží ze stage a používá pouze fiktivní data:
 
 ```sh
-python3 dist/stage-0.10.0/ffp/bin/ffp-webui --config dist/stage-0.10.0/ffp/etc/ffp-webui/config.json --demo
+python3 dist/stage-0.11.0/ffp/bin/ffp-webui --config dist/stage-0.11.0/ffp/etc/ffp-webui/config.json --demo
 ```
 
 ## Stav ověření
 
-Lokální syntaxe, regresní testy, Go testy, build a HTTP smoke test prošly. Na cílovém NSA320 bylo přes `funpkg -i` nainstalováno pouze FFP-WebUI 0.10.0; po restartu health endpoint i stránka hlásily 0.10.0. Konfigurace `config.json` a `luanti.json` zůstaly beze změny. Poté byl obsah, konfigurace i původní package records obnoven z ověřené zálohy a služba se vrátila na 0.9.4; záloha zůstala na zařízení. Živý aktualizátor úspěšně načetl GitHub Releases API a samostatný download-only test stáhl v0.9.5 do dočasného umístění, ověřil její SHA-256 a nic neinstaloval. Před spuštěním Luanti ověřte dostupnost kompatibilní serverové binárky, `sqlite3` modulu statického Pythonu a přístup ke zvoleným cestám. Přímé volání Zypkg CGI nebylo implementováno; karta Balíčky otevírá nativní obrazovky firmwaru.
+Pro v0.11.0 prošly lokální kontroly syntaxe, všech 114 Python testů, Go testy, build, SHA-256 ověření release artefaktů a HTTP smoke test staged balíku v demo režimu. Demo potvrdilo, že Zypkg dotaz nepřistupuje k NAS datům a mutační trasa vrací 423. Na cílovém NSA320 byly dříve read-only `zy-pkgs query` příkazy ověřeny; během vývoje 0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání a nastavení či balíčky NASu nebyly změněny. Rozhraní 0.11.0 proto nebylo cílově ověřeno pro mutující akce. Historický test 0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na 0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, `sqlite3` modul statického Pythonu a přístup ke zvoleným cestám.

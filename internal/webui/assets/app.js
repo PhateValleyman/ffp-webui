@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.10.0';
+const FRONTEND_VERSION = '0.11.0';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -1028,6 +1028,91 @@ async function loadPackages() {
     $('#package-manager').textContent = error.message;
   }
 }
+async function queryZypkg(view, value = '') {
+  const params = new URLSearchParams({ view });
+  if (view === 'package') params.set('name', value);
+  if (view === 'group') params.set('group', value);
+  const target = view === 'package' || view === 'group'
+    ? $('#zypkg-lookup-output') : $(`#zypkg-${view}`);
+  try {
+    const data = await api(`/api/zypkg?${params.toString()}`, { timeoutMs: 45000 });
+    if (target) target.textContent = data.available ? (data.output || '(bez výstupu)') : (data.error || 'Dotaz není dostupný.');
+    if (view === 'package' || view === 'group') {
+      $('#zypkg-lookup-title').textContent = `${view === 'package' ? 'Balíček' : 'Skupina'}: ${value}`;
+      $('#zypkg-lookup-result').hidden = false;
+    }
+    if (data.available) {
+      $('#zypkg-note').textContent = `Poslední úspěšný dotaz: ${data.command}`;
+      $('#zypkg-note').className = 'muted';
+    } else {
+      $('#zypkg-note').textContent = data.error || 'Dotaz na Zysh se nezdařil.';
+      $('#zypkg-note').className = 'notice notice-warn';
+    }
+    return data;
+  } catch (error) {
+    if (target) target.textContent = error.message;
+    $('#zypkg-note').textContent = error.message;
+    $('#zypkg-note').className = 'notice notice-danger';
+    return null;
+  }
+}
+async function loadZypkg() {
+  await queryZypkg('all');
+  await queryZypkg('newver');
+}
+$('#zypkg-refresh').addEventListener('click', loadZypkg);
+$$('[data-zypkg-query]').forEach(button => button.addEventListener('click', () => queryZypkg(button.dataset.zypkgQuery)));
+$('#zypkg-progress-refresh').addEventListener('click', async () => {
+  const output = $('#zypkg-progress');
+  output.hidden = false;
+  await queryZypkg('progress');
+  output.textContent = $('#zypkg-progress').textContent;
+});
+$('#zypkg-lookup-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const name = $('#zypkg-lookup-name').value.trim();
+  await queryZypkg($('#zypkg-lookup-kind').value, name);
+});
+function updateZypkgVersionField() {
+  const needsVersion = ['install', 'uninstall'].includes($('#zypkg-action').value);
+  $('#zypkg-version-field').hidden = !needsVersion;
+  $('#zypkg-action-version').required = needsVersion;
+  if (!needsVersion) $('#zypkg-action-version').value = '';
+}
+$('#zypkg-action').addEventListener('change', updateZypkgVersionField);
+updateZypkgVersionField();
+$('#zypkg-action-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const action = $('#zypkg-action').value;
+  const name = $('#zypkg-action-name').value.trim();
+  const version = ['install', 'uninstall'].includes(action) ? $('#zypkg-action-version').value.trim() : '';
+  const confirmText = ['install', 'uninstall'].includes(action)
+    ? `${action.toUpperCase()} ${name} ${version}` : `${action.toUpperCase()} ${name}`;
+  const warning = `Příkaz bude spuštěn jako správce NASu. Instalace nebo odebrání může ovlivnit firmware a závislosti; automatický návrat ani záloha nejsou k dispozici.\n\nPro pokračování zadejte přesně:\n${confirmText}`;
+  if (prompt(warning) !== confirmText) return;
+  const button = $('#zypkg-action-submit');
+  button.disabled = true;
+  try {
+    const job = await post('/api/zypkg/action', { action, name, version, confirm: confirmText });
+    toast(`Zypkg operace spuštěna (úloha ${job.id}).`);
+    pollJob(job.id, `Zypkg operace dokončena: ${name}`, loadZypkg);
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
+$('#zypkg-update-list').addEventListener('click', async () => {
+  const confirmText = 'UPDATE ZYPKG LISTS';
+  if (prompt(`Aktualizace seznamu může kontaktovat nastavené Zypkg repozitáře. Pro potvrzení zadejte přesně: ${confirmText}`) !== confirmText) return;
+  const button = $('#zypkg-update-list');
+  button.disabled = true;
+  try {
+    const job = await post('/api/zypkg/update-list', { confirm: confirmText });
+    $('#zypkg-progress').hidden = false;
+    $('#zypkg-progress').textContent = 'Obnova seznamu byla spuštěna. Průběh lze načíst tlačítkem „Stav obnovy seznamu“.';
+    toast(`Obnova Zypkg seznamu spuštěna (úloha ${job.id}).`);
+    pollJob(job.id, 'Příkaz k obnově Zypkg seznamu dokončen.', async () => { await queryZypkg('progress'); await loadZypkg(); });
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
 let packageCatalogRows = [];
 let packageArchives = [];
 let selfUpdateStatus = null;
@@ -2905,7 +2990,7 @@ async function refreshView(name) {
   if (name === 'luanti') return loadLuanti();
   if (name === 'environment') return loadEnv();
   if (name === 'users') return loadUsers();
-  if (name === 'packages') return loadPackages();
+  if (name === 'packages') return Promise.all([loadPackages(), loadZypkg()]);
   if (name === 'files') {
     await Promise.all([loadSSH(), loadAdb(), loadRcloneRemotes()]);
     return loadFiles();
