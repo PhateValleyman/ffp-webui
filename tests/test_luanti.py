@@ -247,6 +247,31 @@ class LuantiManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager._account_entry('user_that_does_not_exist_87233')
 
+    def test_list_mods_reads_enabled_state_from_selected_world(self):
+        mod_path = self.paths['mods_path'] / 'example'
+        mod_path.mkdir()
+        (mod_path / 'mod.conf').write_text('name = Example Mod\n', encoding='utf-8')
+        world_mt = self.paths['worlds_path'] / 'main' / 'world.mt'
+
+        listed = self.manager.list_category('mods')
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['title'], 'Example Mod')
+        self.assertFalse(listed[0]['enabled'])
+
+        world_mt.write_text('gameid = default\nload_mod_example = true\n', encoding='utf-8')
+        self.assertTrue(self.manager.list_category('mods')[0]['enabled'])
+        world_mt.write_text('gameid = default\nload_mod_example = false\n', encoding='utf-8')
+        self.assertFalse(self.manager.list_category('mods')[0]['enabled'])
+        world_mt.write_text('gameid = default\nload_mod_example = mods/example\n', encoding='utf-8')
+        self.assertTrue(self.manager.list_category('mods')[0]['enabled'])
+
+    def test_mod_enabled_is_unknown_without_selected_world(self):
+        mod_path = self.paths['mods_path'] / 'example'
+        mod_path.mkdir()
+        self.manager.update_paths({'selected_world': ''})
+        self.assertIsNone(self.manager.mod_enabled('example'))
+        self.assertIsNone(self.manager.list_category('mods')[0]['enabled'])
+
     def test_start_passes_root_identity_to_the_luanti_process(self):
         binary = self.paths['binary_path']
         binary.write_text('#!/bin/sh\nexit 0\n')

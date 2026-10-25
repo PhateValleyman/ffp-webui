@@ -65,6 +65,7 @@ jobs:
               "dist/$PKG_NAME" \
               "dist/$SRC_NAME" \
               "dist/$SUMS_NAME" \
+              "README.md" \
               --title "FFP WebUI $VERSION" \
               --generate-notes
           fi

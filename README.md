@@ -1,8 +1,12 @@
-# FFP WebUI 0.9.2 — Zyxel NSA320
+# FFP WebUI 0.9.3 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.2 nebyl nainstalován ani otestován na NAS.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.3 nebyl nainstalován ani otestován na NAS.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.9.3
+
+- Opraven výpis kategorie modů, který vracel HTTP 500 kvůli chybějící metodě `mod_enabled`. Stav se načítá z `load_mod_<název>` v `world.mt` vybraného světa; chybějící záznam znamená vypnutý mod a bez zvoleného světa se stav nezobrazuje.
 
 ## Novinky v 0.9.2
 
@@ -53,7 +57,7 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 - Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
 - Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
 - Správa ADB, služeb a autostartu, FFP prostředí, balíčků, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
-- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0; cesty opraveny v 0.9.1; účet root povolen v 0.9.2).
+- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0; cesty opraveny v 0.9.1; účet root povolen v 0.9.2; výpis modů opraven v 0.9.3).
 
 ## Runtime a limity
 
@@ -63,7 +67,7 @@ Změna konfigurace remote je blokována během aktivního Rclone přenosu a běh
 
 ## Kontrola aktualizací
 
-Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.2 nebyla nainstalována ani spuštěna na NAS. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
+Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.3 nebyla nainstalována ani spuštěna na NAS. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
 
 ## Build a lokální testy
 
@@ -75,14 +79,14 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.9.2-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.2-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.2-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.9.3-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.3-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.3-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
 Před případnou ruční instalací zkontrolujte checksum a zazálohujte konfiguraci:
 
 ```sh
 cd /cesta/k/dist
-sha256sum -c ffp-webui-0.9.2-SHA256SUMS
-funpkg -i ./ffp-webui-0.9.2-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.9.3-SHA256SUMS
+funpkg -i ./ffp-webui-0.9.3-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -96,4 +100,4 @@ python3 dist/stage/ffp/bin/ffp-webui --config dist/stage/ffp/etc/ffp-webui/confi
 
 ## Stav ověření
 
-Sestavení, syntaxe, regresní testy a HTTP smoke test stage buildu se ověřují lokálně. Vydání 0.9.2 ani jeho instalační balík nebyly nainstalovány nebo spuštěny na NAS; NAS nebyl tímto úkolem změněn. Před spuštěním Luanti ověřte dostupnost kompatibilní serverové binárky, `sqlite3` modulu statického Pythonu a přístup ke zvoleným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.
+Sestavení, syntaxe, regresní testy a HTTP smoke test stage buildu se ověřují lokálně. Balík 0.9.3 nebyl v rámci vydání nainstalován ani spuštěn na NAS; zařízení tímto úkolem nebylo změněno. Před spuštěním Luanti ověřte dostupnost kompatibilní serverové binárky, `sqlite3` modulu statického Pythonu a přístup ke zvoleným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.

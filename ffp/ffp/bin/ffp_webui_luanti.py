@@ -546,6 +546,21 @@ class LuantiManager(object):
         except (OSError, ValueError):
             return mod_name
 
+    def mod_enabled(self, mod_name):
+        if not valid_name(mod_name):
+            return None
+        world_name = self.preferences.get('selected_world', '')
+        if not world_name:
+            return None
+        try:
+            _world_path, _conf_path, text = self._world_conf(world_name)
+        except (OSError, ValueError):
+            return None
+        value = parse_conf(text).get('load_mod_' + mod_name)
+        if value is None:
+            return False
+        return value.strip().lower() not in ('', 'false', '0', 'no', 'off')
+
     def _world_conf(self, world_name):
         world_path = self._item_path('worlds', world_name)
         conf_path = os.path.join(world_path, 'world.mt')

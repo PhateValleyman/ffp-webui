@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.3 — 2026-10-25
+
+- Opraven výpis modů: jejich stav se čte z `load_mod_<název>` ve `world.mt` vybraného světa; bez záznamu je nový mod označen jako vypnutý a bez vybraného světa jako neznámý.
+- Release obsahuje instalační `.txz`, README, zdrojový archiv a manifest SHA-256. NAS nebyl tímto vydáním měněn.
+
 ## 0.9.2 — 2026-10-25
 
 - Luanti lze spustit pod vybraným existujícím systémovým účtem včetně `root`.

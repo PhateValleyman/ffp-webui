@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.9.2';
+const FRONTEND_VERSION = '0.9.3';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
