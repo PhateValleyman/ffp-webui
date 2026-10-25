@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.11.0';
+const FRONTEND_VERSION = '0.12.0';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -102,6 +102,7 @@ function statCard(label, value, meta = '') {
 }
 function setView(name) {
   currentView = name;
+  if (name !== 'adb') stopAdbScreen();
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   $$('.view').forEach(view => view.classList.toggle('active', view.id === `view-${name}`));
   $('#main-content').focus({ preventScroll: true });
@@ -2860,6 +2861,7 @@ async function loadAdb() {
     const data = await api('/api/adb');
     const enabled = data.available && !data.demo;
     adbSetControls(enabled); adbKnownDevices = data.devices || []; refreshFileSources(); refreshTerminalTargets();
+    refreshAdbScreenDevices(enabled);
     note.className = data.error ? 'notice notice-warn' : 'notice notice-info';
     note.textContent = data.error || (enabled ? `ADB nalezen: ${data.binary}` : 'ADB není v demo režimu dostupný.');
     const appDevice = $('#adb-app-device'); const savedSerial = appDevice.value;
@@ -2881,6 +2883,7 @@ async function loadAdb() {
       const panelB = node('button', 'Použít v panelu B', 'button'); panelB.type = 'button'; panelB.disabled = !enabled || device.state !== 'device'; panelB.addEventListener('click', () => selectAdbForPanel('right', device.serial));
       const appButton = node('button', 'Správa aplikací', 'button'); appButton.type = 'button'; appButton.disabled = !enabled || device.state !== 'device'; appButton.addEventListener('click', () => { appDevice.value = device.serial; loadAdbApps(); });
       const shellButton = node('button', 'ADB shell', 'button'); shellButton.type = 'button'; shellButton.disabled = !enabled || device.state !== 'device'; shellButton.addEventListener('click', () => { setView('terminal'); startTerminal('adb', device.serial); });
+      const screenButton = node('button', 'Zrcadlit obrazovku', 'button'); screenButton.type = 'button'; screenButton.disabled = !enabled || device.state !== 'device'; screenButton.addEventListener('click', () => { $('#adb-screen-device').value = device.serial; startAdbScreen(); });
       const rebootMode = node('select', undefined, 'adb-reboot-mode');
       for (const [value, label] of [['system', 'Android / system'], ['recovery', 'Recovery'], ['bootloader', 'Bootloader'], ['fastboot', 'Fastboot / fastbootd']]) rebootMode.add(new Option(label, value));
       rebootMode.disabled = !enabled || device.state !== 'device';
@@ -2893,11 +2896,11 @@ async function loadAdb() {
         catch (error) { toast(error.message, true); }
       });
       const disconnect = node('button', 'Odpojit', 'button button-danger'); disconnect.type = 'button'; disconnect.disabled = !enabled || device.state !== 'device'; disconnect.addEventListener('click', () => disconnectAdb(device.serial));
-      actions.append(openWeb, panelA, panelB, appButton, shellButton, rebootMode, rebootButton, disconnect);
+      actions.append(openWeb, panelA, panelB, appButton, shellButton, screenButton, rebootMode, rebootButton, disconnect);
       row.append(details, actions); box.append(row);
     }
     if (adbSelectedSerial) adbSetControls(enabled);
-  } catch (error) { note.className = 'notice notice-danger'; note.textContent = error.message; adbSetControls(false); box.replaceChildren(node('div', 'Stav ADB se nepodařilo načíst.', 'empty-state')); }
+  } catch (error) { note.className = 'notice notice-danger'; note.textContent = error.message; adbSetControls(false); refreshAdbScreenDevices(false); box.replaceChildren(node('div', 'Stav ADB se nepodařilo načíst.', 'empty-state')); }
 }
 async function disconnectAdb(serial) {
   try {
@@ -3001,3 +3004,190 @@ async function refreshView(name) {
 }
 async function initial() { await Promise.all([loadOverview(), checkBackendVersion()]); }
 initial();
+
+let adbScreenAvailable = false;
+let adbScreenActive = false;
+let adbScreenSerial = '';
+let adbScreenTimer = null;
+let adbScreenGeneration = 0;
+let adbScreenRequestInFlight = false;
+let adbScreenObjectUrl = '';
+let adbScreenPointer = null;
+const ADB_SCREEN_POLL_MS = 1000;
+function updateAdbScreenControls() {
+  const selected = $('#adb-screen-device').value;
+  $('#adb-screen-device').disabled = !adbScreenAvailable || adbScreenActive;
+  $('#adb-screen-start').disabled = !adbScreenAvailable || adbScreenActive || !selected;
+  $('#adb-screen-stop').disabled = !adbScreenActive;
+  $$('[data-adb-screen-key]').forEach(button => { button.disabled = !adbScreenActive; });
+  $('#adb-screen-text').disabled = !adbScreenActive;
+  $('#adb-screen-text-form button').disabled = !adbScreenActive;
+}
+function refreshAdbScreenDevices(enabled) {
+  const select = $('#adb-screen-device');
+  if (!select) return;
+  const previous = select.value || adbScreenSerial;
+  adbScreenAvailable = !!enabled;
+  select.replaceChildren(new Option('Vyberte připojené zařízení', ''));
+  const connected = adbKnownDevices.filter(device => device.state === 'device');
+  for (const device of connected) select.add(new Option(device.serial, device.serial));
+  if (connected.some(device => device.serial === previous)) select.value = previous;
+  else if (adbScreenActive) {
+    stopAdbScreen(true);
+    $('#adb-screen-note').className = 'notice notice-warn';
+    $('#adb-screen-note').textContent = 'Vybrané ADB zařízení již není připojeno.';
+  }
+  updateAdbScreenControls();
+}
+function stopAdbScreen(clearFrame = false) {
+  const wasActive = adbScreenActive;
+  adbScreenActive = false;
+  adbScreenGeneration += 1;
+  if (adbScreenTimer) clearTimeout(adbScreenTimer);
+  adbScreenTimer = null;
+  adbScreenPointer = null;
+  updateAdbScreenControls();
+  if (wasActive) {
+    $('#adb-screen-note').className = 'notice notice-info';
+    $('#adb-screen-note').textContent = 'Zrcadlení zastaveno. Poslední snímek zůstává zobrazený, dokud stránku neopustíte.';
+  }
+  if (clearFrame) {
+    const image = $('#adb-screen-image');
+    image.removeAttribute('src');
+    image.hidden = true;
+    $('#adb-screen-placeholder').hidden = false;
+    $('#adb-screen-stage').hidden = true;
+    if (adbScreenObjectUrl) URL.revokeObjectURL(adbScreenObjectUrl);
+    adbScreenObjectUrl = '';
+  }
+}
+function startAdbScreen() {
+  const serial = $('#adb-screen-device').value;
+  if (!serial || !adbScreenAvailable) return toast('Vyberte připojené ADB zařízení.', true);
+  adbScreenSerial = serial;
+  adbScreenActive = true;
+  adbScreenStageStart();
+}
+function adbScreenStageStart() {
+  const serial = adbScreenSerial;
+  if (!serial || !adbScreenActive) return;
+  if (adbScreenTimer) clearTimeout(adbScreenTimer);
+  adbScreenGeneration += 1;
+  const generation = adbScreenGeneration;
+  $('#adb-screen-stage').hidden = false;
+  $('#adb-screen-placeholder').hidden = false;
+  $('#adb-screen-image').hidden = true;
+  $('#adb-screen-note').className = 'notice notice-info';
+  $('#adb-screen-note').textContent = `Připojuji se k ${serial}…`;
+  updateAdbScreenControls();
+  loadAdbScreenFrame(generation);
+}
+async function loadAdbScreenFrame(generation) {
+  if (!adbScreenActive || generation !== adbScreenGeneration || currentView !== 'adb' || document.hidden || adbScreenRequestInFlight) return;
+  adbScreenRequestInFlight = true;
+  try {
+    const response = await fetch(`/api/adb/screen?${adbQuery({ serial: adbScreenSerial, t: Date.now() })}`, { cache: 'no-store' });
+    if (!response.ok) {
+      let data = {};
+      try { data = await response.json(); } catch (_) {}
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    if (!(response.headers.get('content-type') || '').toLowerCase().startsWith('image/png')) throw new Error('Server nevrátil PNG snímek.');
+    const blob = await response.blob();
+    if (!blob.size || blob.size > 16 * 1024 * 1024) throw new Error('Snímek je prázdný nebo překračuje limit 16 MiB.');
+    if (!adbScreenActive || generation !== adbScreenGeneration) return;
+    const image = $('#adb-screen-image');
+    const previousUrl = adbScreenObjectUrl;
+    adbScreenObjectUrl = URL.createObjectURL(blob);
+    image.onload = () => {
+      $('#adb-screen-placeholder').hidden = true;
+      $('#adb-screen-note').className = 'notice notice-info';
+      $('#adb-screen-note').textContent = `Živě: ${adbScreenSerial} · ${image.naturalWidth} × ${image.naturalHeight} px · přibližně 1 snímek/s`;
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+    };
+    image.onerror = () => {
+      if (adbScreenObjectUrl) URL.revokeObjectURL(adbScreenObjectUrl);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      adbScreenObjectUrl = '';
+      if (adbScreenActive && generation === adbScreenGeneration) {
+        stopAdbScreen(false);
+        $('#adb-screen-note').className = 'notice notice-danger';
+        $('#adb-screen-note').textContent = 'Prohlížeč nedokázal dekódovat PNG snímek.';
+      }
+    };
+    image.src = adbScreenObjectUrl;
+    image.hidden = false;
+    $('#adb-screen-stage').hidden = false;
+  } catch (error) {
+    if (adbScreenActive && generation === adbScreenGeneration) {
+      stopAdbScreen(false);
+      $('#adb-screen-note').className = 'notice notice-danger';
+      $('#adb-screen-note').textContent = `Zrcadlení selhalo: ${error.message}`;
+    }
+  } finally {
+    adbScreenRequestInFlight = false;
+    if (adbScreenActive && currentView === 'adb' && !document.hidden) {
+      const nextGeneration = adbScreenGeneration;
+      adbScreenTimer = setTimeout(() => loadAdbScreenFrame(nextGeneration), ADB_SCREEN_POLL_MS);
+    }
+  }
+}
+async function sendAdbScreenInput(payload) {
+  if (!adbScreenActive) return;
+  try {
+    await post('/api/adb/screen/input', { serial: adbScreenSerial, ...payload });
+    return true;
+  } catch (error) {
+    toast(error.message, true);
+    return false;
+  }
+}
+$('#adb-screen-start').addEventListener('click', startAdbScreen);
+$('#adb-screen-stop').addEventListener('click', () => stopAdbScreen());
+$('#adb-screen-device').addEventListener('change', () => {
+  if (adbScreenActive) stopAdbScreen();
+  adbScreenSerial = $('#adb-screen-device').value;
+  updateAdbScreenControls();
+});
+$$('[data-adb-screen-key]').forEach(button => button.addEventListener('click', () => sendAdbScreenInput({ action: 'key', key: button.dataset.adbScreenKey })));
+$('#adb-screen-text-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = $('#adb-screen-text');
+  if (!input.value) return;
+  if (await sendAdbScreenInput({ action: 'text', text: input.value })) input.value = '';
+});
+$('#adb-screen-image').addEventListener('pointerdown', event => {
+  if (!adbScreenActive || !event.currentTarget.naturalWidth) return;
+  event.preventDefault();
+  adbScreenPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, started: Date.now() };
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch (_) {}
+});
+$('#adb-screen-image').addEventListener('pointerup', event => {
+  const start = adbScreenPointer;
+  adbScreenPointer = null;
+  if (!start || start.id !== event.pointerId || !adbScreenActive) return;
+  const image = event.currentTarget;
+  const rect = image.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const point = (x, y) => ({
+    x: Math.max(0, Math.min(image.naturalWidth - 1, Math.round((x - rect.left) * image.naturalWidth / rect.width))),
+    y: Math.max(0, Math.min(image.naturalHeight - 1, Math.round((y - rect.top) * image.naturalHeight / rect.height)))
+  });
+  const from = point(start.x, start.y);
+  const to = point(event.clientX, event.clientY);
+  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 8) {
+    sendAdbScreenInput({ action: 'tap', x: to.x, y: to.y });
+  } else {
+    sendAdbScreenInput({ action: 'swipe', x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration_ms: Math.max(80, Math.min(1000, Date.now() - start.started)) });
+  }
+});
+$('#adb-screen-image').addEventListener('pointercancel', () => { adbScreenPointer = null; });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && adbScreenActive && currentView === 'adb') {
+    if (adbScreenTimer) clearTimeout(adbScreenTimer);
+    adbScreenTimer = null;
+    loadAdbScreenFrame(adbScreenGeneration);
+  }
+});
+window.addEventListener('pagehide', () => stopAdbScreen(true));
+updateAdbScreenControls();

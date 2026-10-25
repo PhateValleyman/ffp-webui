@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.11.0'
+WEBUI_VERSION = '0.12.0'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -793,6 +793,14 @@ def validate_adb_remote_path(value):
             posixpath.normpath(value) != value or any(part in ('.', '..') for part in value.split('/'))):
         raise ValueError('ADB path must be a normalized absolute path without control characters or dot segments')
     return value
+ADB_SCREEN_MAX_BYTES = 16 * 1024 * 1024
+ADB_SCREEN_MAX_DIMENSION = 16384
+ADB_SCREEN_MAX_PIXELS = 33554432
+ADB_SCREEN_KEYCODES = {'back': 'KEYCODE_BACK', 'home': 'KEYCODE_HOME', 'recent': 'KEYCODE_APP_SWITCH'}
+def validate_adb_screen_coordinate(value):
+    if type(value) is not int or value < 0 or value >= ADB_SCREEN_MAX_DIMENSION:
+        raise ValueError('Screen coordinates must be integers from 0 to 16383')
+    return value
 
 
 def validate_ssh_remote_path(value):
@@ -1000,6 +1008,7 @@ class Backend(object):
         self.cfg = cfg
         self.demo = bool(cfg['demo_mode'])
         self.job_lock = threading.Lock()
+        self.adb_screen_lock = threading.Lock()
         self.jobs = {}
         self.job_order = []
         self.job_active = False
@@ -1421,7 +1430,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Cache-Control', 'no-store')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
         BaseHTTPRequestHandler.end_headers(self)
 
@@ -1430,7 +1439,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Cache-Control', 'no-store')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
 
     def _error(self, status, message):
@@ -1603,6 +1612,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.terminal_close()
         if path == '/api/adb' and self.command == 'GET':
             return self.adb_status()
+        if path == '/api/adb/screen' and self.command == 'GET':
+            return self.adb_screen_capture()
+        if path == '/api/adb/screen/input' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.adb_screen_input()
         if path == '/api/adb/apps' and self.command == 'GET':
             return self.adb_apps()
         if path == '/api/adb/apps/apk' and self.command == 'GET':
@@ -4713,6 +4728,91 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return write_json(self, 200, {'available': True, 'demo': False, 'binary': adb, 'devices': [], 'error': str(exc)[:500]})
 
+    def adb_screen_capture(self):
+        if self.app.demo:
+            return self._error(423, 'Demo mode does not access Android devices')
+        lock = self.app.adb_screen_lock
+        if not lock.acquire(False):
+            return self._error(429, 'An Android screen capture is already in progress')
+        try:
+            serial = validate_adb_serial(self.query_one('serial', ''))
+            adb = self.adb_require_device(serial)
+            image = run_capture_limited(
+                [adb, '-s', serial, 'exec-out', 'screencap', '-p'],
+                12, ADB_SCREEN_MAX_BYTES, discard_stderr=True)
+            if (len(image) < 24 or image[:8] != b'\x89PNG\r\n\x1a\n' or
+                    image[12:16] != b'IHDR'):
+                return self._error(502, 'Android returned an invalid PNG screen capture')
+            width, height = struct.unpack('>II', image[16:24])
+            if (width < 1 or height < 1 or width > ADB_SCREEN_MAX_DIMENSION or
+                    height > ADB_SCREEN_MAX_DIMENSION or width * height > ADB_SCREEN_MAX_PIXELS):
+                return self._error(502, 'Android screen dimensions exceed the safe limit')
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Length', str(len(image)))
+            self.end_headers()
+            self.wfile.write(image)
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        except RuntimeError as exc:
+            status = 413 if 'output exceeded the configured limit' in str(exc) else 502
+            return self._error(status, 'ADB screen capture failed: ' + str(exc)[:300])
+        except Exception as exc:
+            return self._error(502, 'ADB screen capture failed: ' + str(exc)[:300])
+        finally:
+            lock.release()
+    def adb_screen_input(self):
+        req = None
+        try:
+            req = self.app.read_json(self, 8192)
+            if self.app.demo:
+                return self._error(423, 'Demo mode does not control Android devices')
+            serial = validate_adb_serial(req.get('serial'))
+            action = req.get('action')
+            if action == 'tap':
+                x = validate_adb_screen_coordinate(req.get('x'))
+                y = validate_adb_screen_coordinate(req.get('y'))
+                command = 'input tap %d %d' % (x, y)
+            elif action == 'swipe':
+                x1 = validate_adb_screen_coordinate(req.get('x1'))
+                y1 = validate_adb_screen_coordinate(req.get('y1'))
+                x2 = validate_adb_screen_coordinate(req.get('x2'))
+                y2 = validate_adb_screen_coordinate(req.get('y2'))
+                duration = req.get('duration_ms', 350)
+                if type(duration) is not int or duration < 50 or duration > 1500:
+                    raise ValueError('Swipe duration must be between 50 and 1500 milliseconds')
+                command = 'input swipe %d %d %d %d %d' % (x1, y1, x2, y2, duration)
+            elif action == 'key':
+                key = req.get('key')
+                if not isinstance(key, str) or key not in ADB_SCREEN_KEYCODES:
+                    raise ValueError('Allowed screen keys: back, home, recent')
+                command = 'input keyevent ' + ADB_SCREEN_KEYCODES[key]
+            elif action == 'text':
+                text = req.get('text')
+                if not isinstance(text, str) or not text or len(text) > 256 or any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+                    raise ValueError('Text input must contain 1–256 characters without control characters')
+                try:
+                    encoded_text = text.encode('utf-8')
+                except UnicodeEncodeError:
+                    raise ValueError('Text input must be valid UTF-8')
+                if len(encoded_text) > 1024:
+                    raise ValueError('Text input exceeds the 1 KiB limit')
+                if '%s' in text:
+                    raise ValueError('Text input cannot contain the reserved sequence %s')
+                command = 'input text ' + shlex.quote(text.replace(' ', '%s'))
+            else:
+                raise ValueError('Screen action must be tap, swipe, key, or text')
+            adb = self.adb_require_device(serial)
+            run_fixed([adb, '-s', serial, 'shell', command], 8)
+            self.app.audit(self, 'adb_screen_input', serial + ':' + action, 'ok')
+            return write_json(self, 200, {'ok': True, 'serial': serial, 'action': action})
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        except Exception as exc:
+            return self._error(502, 'ADB screen control failed: ' + str(exc)[:300])
+        finally:
+            if req is not None:
+                req.clear()
     def adb_pm_list(self, adb, serial, args):
         command = 'pm list packages ' + args
         output = run_capture_limited([adb, '-s', serial, 'shell', command], 45, 4 * 1024 * 1024)

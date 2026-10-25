@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 — 2026-10-25
+
+- Přidáno ADB zrcadlení obrazovky bez `scrcpy` či instalace na Androidu: živý náhled v prohlížeči, klepnutí/tažení, navigační klávesy Zpět/Domů/Nedávné a omezený textový vstup.
+- Snímání přes `adb exec-out screencap -p` je omezené časem, velikostí i rozměry, snímek se nepersistuje a náhled se obnovuje přibližně jednou za sekundu. Zpracovávané vstupy používají pevnou allowlistu a validované souřadnice.
+- Read-only test na cílovém NSA320 potvrdil, že ADB 1.0.32 vrací platný PNG snímek připojeného tabletu. Nebyl odeslán žádný vstup do zařízení a WebUI v0.12.0 nebylo na NAS instalováno.
+
 ## 0.11.0 — 2026-10-25
 
 - Přidána samostatná správa Zypkg přes lokální `zysh -e`: čtecí dotazy ukazují původní výstup firmwaru; instalace, aktualizace, povolení/zakázání a odebrání používají pouze pevný seznam příkazů a vyžadují přesné potvrzení.

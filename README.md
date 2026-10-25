@@ -1,8 +1,14 @@
-# FFP WebUI 0.11.0 — Zyxel NSA320
+# FFP WebUI 0.12.0 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly. Pro v0.12.0 byla na cílovém NASu pouze read-only ověřena kompatibilita ADB snímání obrazovky; WebUI nebylo aktualizováno a dotykový ani textový vstup nebyl odeslán.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.12.0
+
+- Karta **ADB zařízení** nabízí živý náhled obrazovky připojeného Androidu a základní ovládání klepnutím/tažením, navigačními tlačítky Zpět/Domů/Nedávné a omezeným textovým vstupem. Nepoužívá `scrcpy`, neinstaluje aplikaci do Androidu a snímky neukládá.
+- Snímek se obnovuje přibližně jednou za sekundu. Read-only test na NASu potvrdil funkčnost `adb exec-out screencap -p` s jeho ADB 1.0.32 a připojeným tabletem; žádný vstup do tabletu nebyl odeslán a vydání v0.12.0 nebylo na NAS instalováno.
+- WebUI nemá přihlášení; obrazovka i text odeslaný do zařízení mohou obsahovat citlivé údaje. Zrcadlení používejte pouze v důvěryhodné soukromé síti a jen na zařízení, které smíte ovládat.
 
 ## Novinky v 0.11.0
 
@@ -78,6 +84,7 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 - Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
 - Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
 - Správa ADB, služeb a autostartu, FFP prostředí a balíčků (`funpkg`/`slacker`), Zypkg přes oddělený správce firmwaru, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
+- ADB zrcadlení Androidu s dotykovým klepnutím/tahem, Zpět/Domů/Nedávné a textovým vstupem; snímky se získávají přes existující `adb exec-out screencap` (bez `scrcpy`, instalace balíčků nebo ukládání snímků).
 - Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0; cesty opraveny v 0.9.1; účet root povolen v 0.9.2; výpis modů opraven v 0.9.3; mapování ID her opraveno v 0.9.4; root uživatelská cesta povolena v 0.9.5).
 
 ## Runtime a limity
@@ -85,6 +92,8 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 Startovací skript používá `/ffp/bin/python3.13-static`, který odkazuje na ověřený statický Python a nastavuje CA cestu. Před startem ověřuje `math`, `hashlib` a `ssl`. Snapshot prostředí root loginu volá statický interpreter přímo. Obecný `/ffp/bin/python3.13` se nepřepisuje. Python `curses` není pro ANSI PTY nutný; Python 3.13 odstranil `cgi` a WebUI jej nepoužívá.
 
 Změna konfigurace remote je blokována během aktivního Rclone přenosu a během jiného nedokončeného průvodce. Rclone konfigurace obsahuje přístupové údaje; export/úprava je proto omezena na provider pole a citlivé hodnoty se nezobrazují.
+
+Zrcadlení ADB vyžaduje na NASu existující klientský `adb` s podporou `exec-out` a zařízení ve stavu `device`. Zachycení je omezeno na 12 sekund, 16 MiB a zhruba jeden snímek za sekundu; dotykové příkazy jsou pevně omezené a textový vstup nejvýše 256 znaků. WebUI je v tomto nasazení bez přihlášení, proto jej ponechte pouze na důvěryhodné privátní LAN: obrazovka i odeslaný text mohou obsahovat citlivé údaje.
 
 ## Kontrola aktualizací
 
@@ -102,14 +111,14 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.11.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.11.0-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.11.0/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.12.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.12.0-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.12.0/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
-Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.11.0](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.11.0) README, instalátor `ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.11.0-source.tgz` a manifest `ffp-webui-0.11.0-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
+Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.12.0](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.12.0) README, instalátor `ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.12.0-source.tgz` a manifest `ffp-webui-0.12.0-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
 
 ```sh
 cd /cesta/k/prenesenym-souborum
-sha256sum -c ffp-webui-0.11.0-SHA256SUMS
-funpkg -i ./ffp-webui-0.11.0-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.12.0-SHA256SUMS
+funpkg -i ./ffp-webui-0.12.0-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -120,9 +129,9 @@ Na cílovém NASu bylo ověřeno, že `funpkg -u <nový-archiv>` vrací „Not i
 Demo běží ze stage a používá pouze fiktivní data:
 
 ```sh
-python3 dist/stage-0.11.0/ffp/bin/ffp-webui --config dist/stage-0.11.0/ffp/etc/ffp-webui/config.json --demo
+python3 dist/stage-0.12.0/ffp/bin/ffp-webui --config dist/stage-0.12.0/ffp/etc/ffp-webui/config.json --demo
 ```
 
 ## Stav ověření
 
-Pro v0.11.0 prošly lokální kontroly syntaxe, všech 114 Python testů, Go testy, build, SHA-256 ověření release artefaktů a HTTP smoke test staged balíku v demo režimu. Demo potvrdilo, že Zypkg dotaz nepřistupuje k NAS datům a mutační trasa vrací 423. Na cílovém NSA320 byly dříve read-only `zy-pkgs query` příkazy ověřeny; během vývoje 0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání a nastavení či balíčky NASu nebyly změněny. Rozhraní 0.11.0 proto nebylo cílově ověřeno pro mutující akce. Historický test 0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na 0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, `sqlite3` modul statického Pythonu a přístup ke zvoleným cestám.
+Pro v0.12.0 prošly všechny lokální kontroly syntaxe, 126 Python testů, Go testy, build, SHA-256 ověření artefaktů a HTTP/Chromium smoke test staged balíku v demo režimu. Na NSA320 s ADB 1.0.32 byl bez zápisu do Androidu úspěšně získán platný PNG snímek přes `exec-out screencap -p`. Nebyla testována interakce s dotykem/textem a WebUI v0.12.0 nebylo na NAS instalováno. Dřívější read-only `zy-pkgs query` příkazy na NSA320 byly ověřeny; během vývoje v0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání. Historický test v0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na v0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, modul `sqlite3` statického Pythonu a přístup ke zvoleným cestám.

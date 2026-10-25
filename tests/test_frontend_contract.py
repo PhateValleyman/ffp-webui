@@ -112,11 +112,11 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("const version = ['install', 'uninstall'].includes(action)", self.js)
 
     def test_release_version_is_consistent_across_backend_frontend_and_build(self):
-        self.assertIn("WEBUI_VERSION = '0.11.0'", self.backend)
-        self.assertIn("FRONTEND_VERSION = '0.11.0'", self.js)
-        self.assertIn('WebUI 0.11.0 · Python', self.html)
+        self.assertIn("WEBUI_VERSION = '0.12.0'", self.backend)
+        self.assertIn("FRONTEND_VERSION = '0.12.0'", self.js)
+        self.assertIn('WebUI 0.12.0 · Python', self.html)
         with open(os.path.join(ROOT, 'build.sh'), encoding='utf-8') as handle:
-            self.assertIn('VERSION=${VERSION:-0.11.0}', handle.read())
+            self.assertIn('VERSION=${VERSION:-0.12.0}', handle.read())
 
     def test_github_update_stages_only_ffp_webui_and_manual_install_is_in_browser(self):
         for endpoint in ('/api/self-update', '/api/self-update/check', '/api/self-update/install'):
