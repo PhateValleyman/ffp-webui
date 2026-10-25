@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.9.5';
+const FRONTEND_VERSION = '0.10.0';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -974,6 +974,8 @@ async function loadPackages() {
   void loadPackageCatalog();
   try {
     const data = await api('/api/packages');
+    packageArchives = data.archives || [];
+    void loadSelfUpdate();
     $('#package-manager').textContent = `Správce: ${data.manager} · Inventář: ${data.inventory_source}`;
     const installed = $('#package-inventory');
     installed.replaceChildren();
@@ -1027,6 +1029,8 @@ async function loadPackages() {
   }
 }
 let packageCatalogRows = [];
+let packageArchives = [];
+let selfUpdateStatus = null;
 async function loadPackageCatalog() {
   const note = $('#package-catalog-note'); const box = $('#package-catalog-list');
   if (!box) return;
@@ -1039,6 +1043,88 @@ async function loadPackageCatalog() {
     renderPackageCatalog();
   } catch (error) { note.textContent = error.message; note.className = 'notice notice-danger'; box.replaceChildren(); }
 }
+async function loadSelfUpdate() {
+  const status = $('#self-update-status');
+  const detail = $('#self-update-detail');
+  const release = $('#self-update-release');
+  const install = $('#self-update-install');
+  const check = $('#self-update-check');
+  if (!status) return;
+  try {
+    const data = await api('/api/self-update');
+    selfUpdateStatus = data;
+    install.hidden = data.state !== 'available';
+    const stagedArchive = packageArchives.find(item => item.path === data.staged_path && item.sha256 === data.sha256);
+    install.disabled = data.state !== 'available' || !stagedArchive;
+    check.disabled = data.state === 'demo';
+    const releaseUrl = String(data.release_url || '');
+    const safeReleaseUrl = /^https:\/\/github\.com\/PhateValleyman\/ffp-webui\/releases\/tag\/v[0-9]+\.[0-9]+\.[0-9]+$/.test(releaseUrl);
+    release.hidden = !safeReleaseUrl;
+    if (safeReleaseUrl) release.href = releaseUrl;
+    if (data.state === 'available') {
+      status.textContent = `Je dostupná verze ${data.latest_version}; běží ${data.current_version}.`;
+      detail.textContent = install.disabled
+        ? 'Ověřený instalátor se připravuje nebo seznam archivů potřebuje obnovit. Instalace se nikdy nespouští automaticky.'
+        : `Ověřený archiv ${data.asset_name} je připraven. Instalaci spustíte tlačítkem a potvrzením v prohlížeči.`;
+      detail.className = 'notice notice-warn';
+    } else if (data.state === 'current') {
+      status.textContent = `FFP-WebUI ${data.current_version} je aktuální (GitHub: ${data.latest_version}).`;
+      detail.textContent = 'Automatická kontrola se opakuje každých 24 hodin, pokud je NAS online.';
+      detail.className = 'notice notice-info';
+    } else if (data.state === 'checking' || data.state === 'waiting') {
+      status.textContent = data.state === 'checking' ? 'Kontroluji GitHub…' : 'Čekám na první kontrolu GitHubu…';
+    } else if (data.state === 'demo') {
+      status.textContent = 'Demo režim — aktualizace se nekontrolují.';
+      detail.textContent = data.notes || 'Demo režim nekontaktuje GitHub.';
+    } else {
+      status.textContent = data.error || 'Kontrola GitHubu se nezdařila.';
+      detail.textContent = 'Ověřte připojení NASu k internetu nebo použijte ruční přenos instalačního .txz.';
+      detail.className = 'notice notice-warn';
+    }
+  } catch (error) {
+    status.textContent = error.message;
+    detail.textContent = 'Stav GitHub aktualizací není dostupný; lze pokračovat ručním přenosem instalačního .txz.';
+    detail.className = 'notice notice-warn';
+    install.hidden = true;
+    release.hidden = true;
+  }
+}
+$('#self-update-check').addEventListener('click', async () => {
+  const button = $('#self-update-check');
+  button.disabled = true;
+  try {
+    const job = await post('/api/self-update/check', {});
+    toast(`Kontrola GitHubu spuštěna (úloha ${job.id}).`);
+    pollJob(job.id, 'Kontrola FFP-WebUI dokončena.', async () => { await loadPackages(); await loadSelfUpdate(); });
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
+$('#self-update-install').addEventListener('click', async () => {
+  const update = selfUpdateStatus;
+  const archive = packageArchives.find(item => item.path === update?.staged_path && item.sha256 === update?.sha256);
+  if (!archive || update?.state !== 'available') {
+    toast('Ověřený archiv není v seznamu. Obnovuji seznam balíčků.', true);
+    void loadPackages();
+    return;
+  }
+  const confirmText = `UPGRADE ${update.asset_name}`;
+  const safetyNote = 'Aktualizujete výhradně FFP-WebUI z ověřeného GitHub stagingu. WebUI samo nevytváří zálohu ani rollback: před instalací zazálohujte soubory uvedené v /ffp/funpkg/installed/ffp-webui-* a konfiguraci /ffp/etc/ffp-webui/. Po instalaci restartujte službu FFP-WebUI.';
+  if (prompt(`${safetyNote}\n\nPro potvrzení zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  const button = $('#self-update-install');
+  button.disabled = true;
+  try {
+    const job = await post('/api/self-update/install', { confirm: confirmText });
+    toast(`Ověřená aktualizace spuštěna (úloha ${job.id}).`);
+    pollJob(job.id, 'Instalace dokončena. Restartujte službu FFP-WebUI.', async () => {
+      await loadPackages();
+      $('#self-update-status').textContent = 'Instalační úloha dokončena; restartujte službu FFP-WebUI.';
+      $('#self-update-detail').textContent = 'Nové soubory se načtou až po restartu služby.';
+      $('#self-update-detail').className = 'notice notice-info';
+      button.disabled = true;
+    });
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+});
 function renderPackageCatalog() {
   const box = $('#package-catalog-list'); box.replaceChildren();
   const query = $('#package-catalog-search').value.trim().toLowerCase(); const filter = $('#package-catalog-filter').value;
@@ -1096,7 +1182,11 @@ function formatBytes(number) {
 }
 async function packageAction(archive, action) {
   const confirmText = `${action.toUpperCase()} ${archive.name}`;
-  if (prompt(`Zkontrolujte název a hash. Pro akci zadejte přesně:\n${confirmText}`) !== confirmText) return;
+  const selfUpdate = archive.name.startsWith('ffp-webui-');
+  const safetyNote = selfUpdate
+    ? 'Aktualizujete samotné FFP-WebUI. Zálohujte /ffp/etc/ffp-webui/config.json; tento balík nebyl ověřen na NSA320. Po dokončení restartujte službu FFP-WebUI.'
+    : 'Zkontrolujte název a hash balíčku.';
+  if (prompt(`${safetyNote}\n\nPro akci zadejte přesně:\n${confirmText}`) !== confirmText) return;
   try {
     const result = await post('/api/packages/action', { action, path: archive.path, sha256: archive.sha256, confirm: confirmText });
     if (result.id) {

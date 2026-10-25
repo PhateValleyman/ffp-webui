@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0 — 2026-10-25
+
+- Karta Balíčky odlišuje nativní Zypkg správu od FFP `funpkg`/`slacker` a nabízí přímé odkazy na dvě stránky firmware Zyxel. Volání neověřeného CGI protokolu není povoleno; instalaci Zypkg dál provádí firmware.
+- FFP-WebUI automaticky kontroluje stabilní GitHub vydání a stáhne pouze ověřený FFP-WebUI `.txz` do stagingu; instalaci lze ručně spustit v prohlížeči. Na cílovém NASu byla v0.10.0 instalována přes `funpkg -i`, po restartu potvrzena přes health endpoint a následně vrácena z ověřené zálohy na původní v0.9.4; obě konfigurační položky zůstaly zachovány.
+- Živý aktualizátor načetl GitHub Releases API; download-only test stáhl v0.9.5 do izolovaného dočasného stagingu, ověřil SHA-256 a neinstaloval ji. `funpkg -u` pro nový archiv přitom hlásí „Not installed“ i při existující starší verzi, proto updater používá `-i` a ověřuje přesný záznam v `funpkg -q .`. Zypkg aktualizace firmwaru zůstávají oddělené.
+
 ## 0.9.5 — 2026-10-25
 
 - Luanti accepts `/ffp/home/root/.minetest` as `user_path` only when games, worlds, mods and skins are its immediate matching subdirectories; unrelated overlaps, nested paths and symlink aliases remain rejected.

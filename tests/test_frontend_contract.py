@@ -90,6 +90,52 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn('run_as_user', path_save)
         self.assertNotIn('selected_world', path_save)
 
+    def test_zypkg_firmware_shortcuts_are_separate_from_funpkg_management(self):
+        self.assertIn('id="zypkg-manager"', self.html)
+        self.assertIn('Správa Zypkg balíčků', self.html)
+        self.assertIn('/r49435,/adv,/admin/firmware_package.html', self.html)
+        self.assertIn('/r49435,/adv,/admin/apps_package_mgmt_install.html', self.html)
+        self.assertIn('Samostatný správce firmwaru; není součástí FFP/funpkg.', self.html)
+        self.assertIn('Automatická aktualizace FFP-WebUI je oddělená', self.html)
+        self.assertIn("'/api/packages/catalog'", self.backend)
+        self.assertIn("path == '/api/packages/catalog/action' and self.command == 'POST'", self.backend)
+
+    def test_release_version_is_consistent_across_backend_frontend_and_build(self):
+        self.assertIn("WEBUI_VERSION = '0.10.0'", self.backend)
+        self.assertIn("FRONTEND_VERSION = '0.10.0'", self.js)
+        self.assertIn('WebUI 0.10.0 · Python', self.html)
+        with open(os.path.join(ROOT, 'build.sh'), encoding='utf-8') as handle:
+            self.assertIn('VERSION=${VERSION:-0.10.0}', handle.read())
+
+    def test_github_update_stages_only_ffp_webui_and_manual_install_is_in_browser(self):
+        for endpoint in ('/api/self-update', '/api/self-update/check', '/api/self-update/install'):
+            with self.subTest(endpoint=endpoint):
+                self.assertIn(endpoint, self.js)
+                self.assertIn(endpoint, self.backend)
+        for element_id in ('self-update-status', 'self-update-check', 'self-update-install', 'self-update-release'):
+            with self.subTest(element_id=element_id):
+                self.assertIn(f'id="{element_id}"', self.html)
+        self.assertIn('POUZE FFP-WEBUI', self.html)
+        self.assertIn('SHA-256', self.backend)
+        self.assertIn('item.path === data.staged_path && item.sha256 === data.sha256', self.js)
+        self.assertIn("post('/api/self-update/install', { confirm: confirmText })", self.js)
+        self.assertNotIn("packageAction(archive, 'upgrade')", self.js)
+        self.assertIn('def self_update_install(self):', self.backend)
+        self.assertIn('verified_install_target()', self.backend)
+        self.assertIn('GitHubSelfUpdater', self.backend)
+        self.assertIn("run_fixed([funpkg, '-i', package]", self.backend)
+        self.assertIn("run_fixed([funpkg, '-q', '.']", self.backend)
+        self.assertIn('WebUI samo nevytváří zálohu ani rollback', self.js)
+        self.assertIn('/ffp/funpkg/installed/ffp-webui-*', self.js)
+        updater_path = os.path.join(ROOT, 'ffp', 'ffp', 'bin', 'ffp_webui_update.py')
+        with open(updater_path, encoding='utf-8') as handle:
+            updater = handle.read()
+        self.assertIn('release-assets.githubusercontent.com', updater)
+        self.assertIn('def verified_install_target(self):', updater)
+        self.assertIn('digest changed after staging', updater)
+        self.assertNotIn('subprocess', updater)
+        self.assertNotIn('os.system(', updater)
+
 
 if __name__ == '__main__':
     unittest.main()

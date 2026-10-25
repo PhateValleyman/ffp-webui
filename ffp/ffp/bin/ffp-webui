@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.9.5'
+WEBUI_VERSION = '0.10.0'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -47,6 +47,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 from ffp_webui_rclone import RcloneBridge, normalize_remote_path
 from ffp_webui_luanti import LuantiManager
+from ffp_webui_update import GitHubSelfUpdater
 ENV_FILE = '/ffp/etc/ffp-webui/environment'
 STATE_ROOT = '/ffp/var/ffp-webui'
 PACKAGE_DB_DIR = '/ffp/funpkg/installed'
@@ -1004,6 +1005,7 @@ class Backend(object):
         self.rclone = RcloneBridge(self, command_path, fixed_env, read_sshfs_mounts)
         self.luanti = LuantiManager(state_root=STATE_ROOT, demo=self.demo, find_binary=command_path)
         self.audit_file = None
+        self.self_updater = None
         if not self.demo:
             os.makedirs(STATE_ROOT, mode=0o700, exist_ok=True)
             os.chmod(STATE_ROOT, 0o700)
@@ -1011,6 +1013,9 @@ class Backend(object):
             audit = os.path.join(STATE_ROOT, 'audit.log')
             fd = os.open(audit, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             self.audit_file = os.fdopen(fd, 'a')
+            self.self_updater = GitHubSelfUpdater(WEBUI_VERSION, STATE_ROOT,
+                                                  self.cfg['max_package_bytes'])
+            self.self_updater.start()
 
     def audit(self, handler, action, target, result):
         # Submitted values, request bodies, hashes, and credentials never enter the audit log.
@@ -1022,6 +1027,8 @@ class Backend(object):
         self.audit_file.flush()
 
     def close(self):
+        if self.self_updater is not None:
+            self.self_updater.close()
         self.terminal.close_all()
         self.rclone.close()
         if self.audit_file is not None:
@@ -1508,6 +1515,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/health' and self.command == 'GET':
             return write_json(self, 200, {'ok': True, 'demo': self.app.demo,
                                           'authentication': 'disabled', 'version': WEBUI_VERSION})
+        if path == '/api/self-update' and self.command == 'GET':
+            if self.app.demo:
+                return write_json(self, 200, {'current_version': WEBUI_VERSION, 'state': 'demo',
+                    'automatic_check': False, 'interval_hours': 24, 'latest_version': '',
+                    'release_url': '', 'asset_name': '', 'staged_path': '', 'sha256': '',
+                    'last_checked_at': '', 'error': '', 'notes': 'Demo režim nekontaktuje GitHub.'})
+            return write_json(self, 200, self.app.self_updater.status())
+        if path == '/api/self-update/check' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            try:
+                job = self.app.start_job('check FFP-WebUI GitHub release',
+                    lambda: json.dumps(self.app.self_updater.check_now(), ensure_ascii=False))
+                return write_json(self, 202, job)
+            except RuntimeError as exc:
+                return self._error(409, str(exc)[:300])
+        if path == '/api/self-update/install' and self.command == 'POST':
+            return self.self_update_install()
         if path == '/api/luanti' and self.command == 'GET':
             return self.luanti_snapshot()
         if path == '/api/luanti/log' and self.command == 'GET':
@@ -3366,6 +3391,50 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._error(409, str(exc))
         self.app.audit(self, 'package_uninstall', name, 'started')
+        req.clear()
+        return write_json(self, 202, job)
+
+    def self_update_install(self):
+        if not self.app.require_live(self):
+            return
+        req = self.app.read_json(self, 8192)
+        if any(key != 'confirm' for key in req):
+            return self._error(400, 'Only an exact update confirmation is accepted')
+        try:
+            target = self.app.self_updater.verified_install_target()
+        except Exception:
+            return self._error(409, 'No verified GitHub installer is ready, or its contents changed')
+        confirm = 'UPGRADE ' + target['asset_name']
+        if req.get('confirm') != confirm:
+            return self._error(400, 'Exact verified update confirmation required')
+        try:
+            package = self.app.package_path(target['path'])
+            if package != target['path']:
+                raise ValueError('staged path changed')
+        except Exception:
+            return self._error(409, 'Verified staged installer is no longer available')
+        actual = sha256_file(package)
+        if actual.lower() != target['sha256']:
+            return self._error(422, 'Verified installer SHA-256 changed; funpkg was not run')
+        funpkg = command_path('funpkg')
+        if not funpkg:
+            return self._error(503, 'funpkg was not found')
+        # On the target FFP funpkg, a new full package name is installed with -i;
+        # -u reports "Not installed" for a version not already in its inventory.
+        kind = 'funpkg -i verified ' + target['asset_name']
+        def operate():
+            output = run_fixed([funpkg, '-i', package], self.app.cfg['operation_timeout_seconds'])
+            installed_output = run_fixed([funpkg, '-q', '.'], 20)
+            expected_name = target['asset_name'][:-4]
+            installed_names = {line.strip() for line in installed_output.splitlines() if line.strip()}
+            if expected_name not in installed_names:
+                raise RuntimeError('funpkg did not report the FFP-WebUI update as installed')
+            return output
+        try:
+            job = self.app.start_job(kind, operate)
+        except Exception as exc:
+            return self._error(409, str(exc)[:300])
+        self.app.audit(self, 'package_self_update', target['asset_name'], 'started')
         req.clear()
         return write_json(self, 202, job)
 

@@ -66,6 +66,113 @@ class PackageManagementTests(unittest.TestCase):
         self.assertEqual(result, 'rejected')
         handler._error.assert_called_once_with(404, 'Package is not in the current funpkg -q . inventory')
 
+    def test_self_update_install_uses_only_verified_staged_path_and_digest(self):
+        asset_name = 'ffp-webui-1.10.0-python3.13-static-UNVERIFIED.txz'
+        staged_path = '/ffp/var/ffp-webui/packages/' + asset_name
+        digest = 'a' * 64
+        req = {'confirm': 'UPGRADE ' + asset_name}
+        start_job = mock.Mock(return_value={'id': 'job2'})
+        audit = mock.Mock()
+        target = {'asset_name': asset_name, 'path': staged_path, 'sha256': digest}
+        app = SimpleNamespace(
+            require_live=lambda _handler: True,
+            read_json=lambda _handler, _limit: req,
+            self_updater=SimpleNamespace(verified_install_target=mock.Mock(return_value=target)),
+            package_path=mock.Mock(side_effect=lambda path: path),
+            cfg={'operation_timeout_seconds': 30},
+            start_job=start_job,
+            audit=audit,
+        )
+        handler = object.__new__(FFP.Handler)
+        handler.server = SimpleNamespace(app=app)
+        with mock.patch.object(FFP, 'command_path', return_value='/ffp/bin/funpkg'), \
+             mock.patch.object(FFP, 'sha256_file', return_value=digest), \
+             mock.patch.object(FFP, 'run_fixed', side_effect=['installed', asset_name[:-4]]) as run, \
+             mock.patch.object(FFP, 'write_json', side_effect=lambda _h, status, body: (status, body)):
+            status, body = handler.self_update_install()
+            kind, operation = start_job.call_args.args
+            result = operation()
+        self.assertEqual((status, body), (202, {'id': 'job2'}))
+        self.assertEqual(kind, 'funpkg -i verified ' + asset_name)
+        app.self_updater.verified_install_target.assert_called_once_with()
+        app.package_path.assert_called_once_with(staged_path)
+        run.assert_has_calls([
+            mock.call(['/ffp/bin/funpkg', '-i', staged_path], 30),
+            mock.call(['/ffp/bin/funpkg', '-q', '.'], 20),
+        ])
+        self.assertEqual(result, 'installed')
+        audit.assert_called_once_with(handler, 'package_self_update', asset_name, 'started')
+        self.assertEqual(req, {})
+
+    def test_self_update_install_fails_if_funpkg_inventory_lacks_release(self):
+        asset_name = 'ffp-webui-1.10.0-python3.13-static-UNVERIFIED.txz'
+        staged_path = '/ffp/var/ffp-webui/packages/' + asset_name
+        digest = 'a' * 64
+        req = {'confirm': 'UPGRADE ' + asset_name}
+        start_job = mock.Mock(return_value={'id': 'job3'})
+        app = SimpleNamespace(
+            require_live=lambda _handler: True,
+            read_json=lambda _handler, _limit: req,
+            self_updater=SimpleNamespace(verified_install_target=mock.Mock(return_value={
+                'asset_name': asset_name, 'path': staged_path, 'sha256': digest})),
+            package_path=lambda path: path,
+            cfg={'operation_timeout_seconds': 30},
+            start_job=start_job,
+            audit=mock.Mock(),
+        )
+        handler = object.__new__(FFP.Handler)
+        handler.server = SimpleNamespace(app=app)
+        with mock.patch.object(FFP, 'command_path', return_value='/ffp/bin/funpkg'), \
+             mock.patch.object(FFP, 'sha256_file', return_value=digest), \
+             mock.patch.object(FFP, 'run_fixed', side_effect=[
+                 'Not installed', 'ffp-webui-0.9.4-python3.13-static-UNVERIFIED']), \
+             mock.patch.object(FFP, 'write_json', side_effect=lambda _h, status, body: (status, body)):
+            status, body = handler.self_update_install()
+            _kind, operation = start_job.call_args.args
+            self.assertEqual((status, body), (202, {'id': 'job3'}))
+            with self.assertRaisesRegex(RuntimeError, 'did not report the FFP-WebUI update as installed'):
+                operation()
+
+    def test_self_update_install_rejects_client_path_override(self):
+        req = {'confirm': 'UPGRADE archive.txz', 'path': '/ffp/pkg/archive.txz', 'sha256': 'b' * 64}
+        start_job = mock.Mock()
+        updater = SimpleNamespace(verified_install_target=mock.Mock())
+        app = SimpleNamespace(
+            require_live=lambda _handler: True,
+            read_json=lambda _handler, _limit: req,
+            self_updater=updater,
+            start_job=start_job,
+        )
+        handler = object.__new__(FFP.Handler)
+        handler.server = SimpleNamespace(app=app)
+        handler._error = mock.Mock(return_value='rejected')
+        result = handler.self_update_install()
+        self.assertEqual(result, 'rejected')
+        handler._error.assert_called_once_with(400, 'Only an exact update confirmation is accepted')
+        updater.verified_install_target.assert_not_called()
+        start_job.assert_not_called()
+
+    def test_self_update_install_refuses_changed_staged_digest(self):
+        asset_name = 'ffp-webui-1.10.0-python3.13-static-UNVERIFIED.txz'
+        staged_path = '/ffp/var/ffp-webui/packages/' + asset_name
+        req = {'confirm': 'UPGRADE ' + asset_name}
+        app = SimpleNamespace(
+            require_live=lambda _handler: True,
+            read_json=lambda _handler, _limit: req,
+            self_updater=SimpleNamespace(verified_install_target=mock.Mock(return_value={
+                'asset_name': asset_name, 'path': staged_path, 'sha256': 'a' * 64})),
+            package_path=lambda path: path,
+            start_job=mock.Mock(),
+        )
+        handler = object.__new__(FFP.Handler)
+        handler.server = SimpleNamespace(app=app)
+        handler._error = mock.Mock(return_value='rejected')
+        with mock.patch.object(FFP, 'sha256_file', return_value='b' * 64):
+            result = handler.self_update_install()
+        self.assertEqual(result, 'rejected')
+        handler._error.assert_called_once_with(422, 'Verified installer SHA-256 changed; funpkg was not run')
+        app.start_job.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

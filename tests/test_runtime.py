@@ -43,10 +43,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("os.environ.setdefault('SSL_CERT_FILE', '/ffp/opt/python-3.13-static/ssl/cert.pem')", backend)
         self.assertIn("'/ffp/bin/bash', '/ffp/opt/python-3.13-static/bin/python3.13'", backend)
         self.assertIn('from ffp_webui_rclone import RcloneBridge, normalize_remote_path', backend)
+        self.assertIn('from ffp_webui_update import GitHubSelfUpdater', backend)
         build_path = os.path.join(project, 'build.sh')
+        self.assertTrue(os.access(build_path, os.X_OK), 'GitHub Actions invokes ./build.sh directly')
         with open(build_path, 'r', encoding='utf-8') as handle:
             builder = handle.read()
         self.assertIn('ffp_webui_rclone.py" "$STAGE/ffp/bin/ffp_webui_rclone.py"', builder)
+        self.assertIn('ffp_webui_update.py" "$STAGE/ffp/bin/ffp_webui_update.py"', builder)
         service_path = os.path.join(project, 'ffp', 'ffp', 'start', 'ffp-webui.sh')
         with open(service_path, 'r', encoding='utf-8') as handle:
             service = handle.read()
