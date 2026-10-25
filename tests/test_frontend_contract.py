@@ -73,6 +73,17 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('backend-version-warning', self.html)
         self.assertIn('Cache-Control', self.backend)
 
+    def test_luanti_paths_can_be_saved_before_world_or_account_selection(self):
+        self.assertIn('id="luanti-paths-save"', self.html)
+        self.assertIn("path == '/api/luanti/paths' and self.command == 'POST'", self.backend)
+        self.assertIn('def luanti_paths_save(self):', self.backend)
+        start = self.js.index('async function saveLuantiPaths()')
+        end = self.js.index("$('#luanti-paths-save').addEventListener", start)
+        path_save = self.js[start:end]
+        self.assertIn("post('/api/luanti/paths', { paths })", path_save)
+        self.assertNotIn('run_as_user', path_save)
+        self.assertNotIn('selected_world', path_save)
+
 
 if __name__ == '__main__':
     unittest.main()

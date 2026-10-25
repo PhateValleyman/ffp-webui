@@ -1,8 +1,14 @@
-# FFP WebUI 0.9.0 — Zyxel NSA320
+# FFP WebUI 0.9.1 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.0 nebyl nainstalován ani otestován na NAS.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.1 nebyl nainstalován ani otestován na NAS.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.9.1
+
+- Luanti nyní nabízí tlačítko **Uložit pouze cesty**, které nevyžaduje vybranou hru, svět ani servisní účet. Po uložení se znovu načtou dostupné hry a světy; účet a úplnou konfiguraci lze nastavit později.
+- Výchozí cesty odpovídají rozložení na NSA320: `/ffp/bin/luantiserver`, `/ffp/etc/luanti/minetest.conf` a `/ffp/home/root/.minetest/{games,worlds,mods,skins,data}`. Instalace s dosavadními automatickými cestami se převede; vlastní cesty zůstanou zachovány.
+- Cesty mohou vést přes symlinkovaný domovský adresář FFP. Překryvy datových cest a aliasy na interní stav WebUI se stále odmítají; přístup servisního účtu se kontroluje na skutečném cíli.
 
 ## Novinky v 0.9.0
 
@@ -42,7 +48,7 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 - Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
 - Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
 - Správa ADB, služeb a autostartu, FFP prostředí, balíčků, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
-- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (vydání 0.9.0; viz bezpečnostní omezení výše).
+- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0, cesty opraveny v 0.9.1; viz bezpečnostní omezení výše).
 
 ## Runtime a limity
 
@@ -52,7 +58,7 @@ Změna konfigurace remote je blokována během aktivního Rclone přenosu a běh
 
 ## Kontrola aktualizací
 
-Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.0 je předběžné vydání, dokud nebude instalační balík ověřen na NAS. Případná read-only kontrola má vybírat jen stabilní vydání a ověřovat SHA-256. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
+Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.1 je předběžné vydání, dokud nebude instalační balík ověřen na NAS. Případná read-only kontrola má vybírat jen stabilní vydání a ověřovat SHA-256. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
 
 ## Build a lokální testy
 
@@ -64,14 +70,14 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.9.0-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.0-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.0-SHA256SUMS` a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.9.1-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.1-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.1-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
 Před případnou ruční instalací zkontrolujte checksum a zazálohujte konfiguraci:
 
 ```sh
 cd /cesta/k/dist
-sha256sum -c ffp-webui-0.9.0-SHA256SUMS
-funpkg -i ./ffp-webui-0.9.0-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.9.1-SHA256SUMS
+funpkg -i ./ffp-webui-0.9.1-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -85,4 +91,4 @@ python3 dist/stage/ffp/bin/ffp-webui --config dist/stage/ffp/etc/ffp-webui/confi
 
 ## Stav ověření
 
-Sestavení, syntaxe a regresní testy se ověřují lokálně, stejně jako HTTP smoke test stage buildu. Vydání 0.9.0 a jeho instalační balík nebyly nainstalovány ani spuštěny na NAS; NAS nebyl tímto úkolem změněn. Před nasazením Luanti ověřte na zařízení dostupnost kompatibilní serverové binárky, `sqlite3` modul statického Pythonu, ne-root účtu a přístup k nastaveným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.
+Sestavení, syntaxe, regresní testy a HTTP smoke test stage buildu se ověřují lokálně. Vydání 0.9.1 ani jeho instalační balík nebyly nainstalovány nebo spuštěny na NAS; NAS nebyl tímto úkolem změněn. Před spuštěním Luanti ověřte na zařízení dostupnost kompatibilní serverové binárky, `sqlite3` modul statického Pythonu, ne-root účtu a přístup k nastaveným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.

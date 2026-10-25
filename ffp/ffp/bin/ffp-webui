@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.9.0'
+WEBUI_VERSION = '0.9.1'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -1520,6 +1520,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.luanti_backup_download()
         if path == '/api/luanti/backups' and self.command == 'GET':
             return write_json(self, 200, {'backups': self.app.luanti.list_backups(), 'demo': self.app.demo})
+        if path == '/api/luanti/paths' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_paths_save()
         if path == '/api/luanti/config' and self.command == 'POST':
             if not self.app.require_live(self):
                 return
@@ -1901,6 +1905,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._luanti_error(exc)
 
+    def luanti_paths_save(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            if self.app.luanti.is_running():
+                return self._error(409, 'Stop the Luanti server before changing paths')
+            paths = data.get('paths')
+            allowed = set(('binary_path', 'config_path', 'games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path'))
+            if not isinstance(paths, dict) or not paths or set(paths) - allowed:
+                return self._error(400, 'Path-only settings must contain Luanti paths, without account or world selection')
+            result = self.app.luanti.update_paths(paths)
+            self.app.audit(self, 'luanti-paths-save', 'paths', 'success')
+            return write_json(self, 200, {'ok': True, 'paths': result})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-paths-save', 'paths', 'failed')
+            return self._luanti_error(exc)
     def luanti_config_save(self):
         try:
             data = self.app.read_json(self, 3 << 20)

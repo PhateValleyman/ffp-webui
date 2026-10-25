@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import sys
@@ -42,6 +43,104 @@ class LuantiManagerTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_defaults_match_nas_screenshot_paths(self):
+        manager = LuantiManager(
+            state_root=str(self.root / 'defaults-state'),
+            preferences_path=str(self.root / 'defaults.json'),
+            find_binary=None,
+        )
+        expected = {
+            'binary_path': '/ffp/bin/luantiserver',
+            'config_path': '/ffp/etc/luanti/minetest.conf',
+            'games_path': '/ffp/home/root/.minetest/games',
+            'worlds_path': '/ffp/home/root/.minetest/worlds',
+            'mods_path': '/ffp/home/root/.minetest/mods',
+            'skins_path': '/ffp/home/root/.minetest/skins',
+            'user_path': '/ffp/home/root/.minetest/data',
+        }
+        self.assertEqual({key: manager.preferences[key] for key in expected}, expected)
+
+    def test_legacy_auto_defaults_migrate_but_path_only_values_persist(self):
+        preferences = self.root / 'legacy-preferences.json'
+        preferences.write_text(json.dumps({
+            'binary_path': '/ffp/bin/minetestserver',
+            'config_path': '/ffp/etc/minetest.conf',
+            'games_path': '/ffp/share/luanti/games',
+            'worlds_path': '/ffp/var/luanti/worlds',
+            'mods_path': '/ffp/share/luanti/mods',
+            'skins_path': '/ffp/share/luanti/skins',
+            'user_path': '/ffp/var/luanti/user',
+        }), encoding='utf-8')
+        manager = LuantiManager(
+            state_root=str(self.root / 'migrated-state'),
+            preferences_path=str(preferences),
+            find_binary=None,
+        )
+        expected = {
+            'binary_path': '/ffp/bin/luantiserver',
+            'config_path': '/ffp/etc/luanti/minetest.conf',
+            'games_path': '/ffp/home/root/.minetest/games',
+            'worlds_path': '/ffp/home/root/.minetest/worlds',
+            'mods_path': '/ffp/home/root/.minetest/mods',
+            'skins_path': '/ffp/home/root/.minetest/skins',
+            'user_path': '/ffp/home/root/.minetest/data',
+        }
+        self.assertEqual({key: manager.preferences[key] for key in expected}, expected)
+        self.assertEqual(manager.preferences['selected_world'], '')
+        self.assertEqual(manager.preferences['run_as_user'], '')
+
+    def test_paths_can_be_saved_without_world_or_service_account(self):
+        preferences = self.root / 'path-only' / 'luanti.json'
+        manager = LuantiManager(
+            state_root=str(self.root / 'path-only-state'),
+            preferences_path=str(preferences),
+            find_binary=None,
+        )
+        values = {key: str(value) for key, value in self.paths.items()}
+        result = manager.update_paths(values)
+        self.assertEqual(result['selected_world'], '')
+        self.assertEqual(result['run_as_user'], '')
+        self.assertEqual({key: result[key] for key in values}, values)
+        reloaded = LuantiManager(
+            state_root=str(self.root / 'path-only-state'),
+            preferences_path=str(preferences),
+            find_binary=None,
+        )
+        self.assertEqual({key: reloaded.preferences[key] for key in values}, values)
+        self.assertEqual(reloaded.preferences['selected_world'], '')
+        self.assertEqual(reloaded.preferences['run_as_user'], '')
+
+    def test_path_default_migration_preserves_custom_directory(self):
+        preferences = self.root / 'custom-preferences.json'
+        custom_games = str(self.paths['games_path'])
+        preferences.write_text(json.dumps({
+            'games_path': custom_games,
+            'worlds_path': '/ffp/var/luanti/worlds',
+            'mods_path': '/ffp/share/luanti/mods',
+            'skins_path': '/ffp/share/luanti/skins',
+            'user_path': '/ffp/var/luanti/user',
+        }), encoding='utf-8')
+        manager = LuantiManager(
+            state_root=str(self.root / 'custom-state'),
+            preferences_path=str(preferences),
+            find_binary=None,
+        )
+        self.assertEqual(manager.preferences['games_path'], custom_games)
+        self.assertEqual(manager.preferences['worlds_path'], '/ffp/home/root/.minetest/worlds')
+
+    def test_symlinked_home_paths_are_allowed_but_internal_state_aliases_are_not(self):
+        home_target = self.root / 'home-target'
+        home_target.mkdir()
+        home_alias = self.root / 'home-alias'
+        home_alias.symlink_to(home_target, target_is_directory=True)
+        games_path = str(home_alias / '.minetest' / 'games')
+        self.manager.update_paths({'games_path': games_path})
+        self.assertEqual(self.manager.preferences['games_path'], games_path)
+        state_alias = self.root / 'state-alias'
+        state_alias.symlink_to(self.manager.state_root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'internal state'):
+            self.manager.validate_path(str(state_alias / 'luanti' / 'outside'))
 
     def set_auth_file(self, rows=''):
         world = self.paths['worlds_path'] / 'main'

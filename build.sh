@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
-VERSION=${VERSION:-0.9.0}
+VERSION=${VERSION:-0.9.1}
 
 case "$VERSION" in
     ''|*[!0-9A-Za-z._-]*)
@@ -56,7 +56,7 @@ tar --owner=0 --group=0 --numeric-owner -cJf "$PKG" ffp
 # Create a clean source archive without private request notes, NAS probes, or caches.
 cd "$ROOT"
 tar --exclude='__pycache__' --exclude='*.pyc' -czf "$SRC" \
-    README.md build.sh go.mod cmd internal ffp tests \
+    README.md CHANGELOG.md build.sh go.mod cmd internal ffp tests \
     references/rclone-webui-integration-research.md \
     references/next-release-design-notes.md \
     references/luanti-management-sources.md

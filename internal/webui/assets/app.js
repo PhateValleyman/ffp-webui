@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.9.0';
+const FRONTEND_VERSION = '0.9.1';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -274,6 +274,7 @@ async function loadLuanti() {
     const form = $('#luanti-settings-form');
     const canEdit = !demo && !running;
     $('#luanti-settings-form button[type="submit"]').disabled = !canEdit;
+    $('#luanti-paths-save').disabled = !canEdit;
     $('#luanti-prepare-owner').disabled = !canEdit || !status.selected_world || !status.run_as_user;
     if (firstLoad || !form.contains(document.activeElement)) {
       for (const [field, id] of Object.entries({
@@ -480,6 +481,20 @@ $('#luanti-log-refresh').addEventListener('click', async () => {
   try { $('#luanti-log').textContent = await api('/api/luanti/log'); }
   catch (error) { $('#luanti-log').textContent = error.message; }
 });
+async function saveLuantiPaths() {
+  const paths = {
+    binary_path: $('#luanti-binary-path').value.trim(), config_path: $('#luanti-config-path').value.trim(),
+    games_path: $('#luanti-games-path').value.trim(), worlds_path: $('#luanti-worlds-path').value.trim(),
+    mods_path: $('#luanti-mods-path').value.trim(), skins_path: $('#luanti-skins-path').value.trim(),
+    user_path: $('#luanti-user-path').value.trim()
+  };
+  try {
+    await post('/api/luanti/paths', { paths });
+    toast('Cesty uloženy. Nyní lze načíst dostupné hry a světy.');
+    await loadLuanti();
+  } catch (error) { toast(error.message, true); }
+}
+$('#luanti-paths-save').addEventListener('click', saveLuantiPaths);
 $('#luanti-settings-form').addEventListener('submit', async event => {
   event.preventDefault();
   const paths = {

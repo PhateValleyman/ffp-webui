@@ -23,6 +23,25 @@ NAME_RE = re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 PLAYER_RE = re.compile(r'^[A-Za-z0-9_-]{1,20}$')
 CONF_KEY_RE = re.compile(r'^[A-Za-z0-9_.]+$')
 SECRET_KEY_RE = re.compile(r'(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)', re.I)
+PATH_DEFAULTS_VERSION = 2
+SCREENSHOT_PATH_DEFAULTS = {
+    'binary_path': '/ffp/bin/luantiserver',
+    'config_path': '/ffp/etc/luanti/minetest.conf',
+    'games_path': '/ffp/home/root/.minetest/games',
+    'worlds_path': '/ffp/home/root/.minetest/worlds',
+    'mods_path': '/ffp/home/root/.minetest/mods',
+    'skins_path': '/ffp/home/root/.minetest/skins',
+    'user_path': '/ffp/home/root/.minetest/data',
+}
+LEGACY_PATH_DEFAULTS = {
+    'binary_path': ('/ffp/bin/luantiserver', '/ffp/bin/minetestserver', '/ffp/bin/luanti', '/ffp/bin/minetest'),
+    'config_path': ('/ffp/etc/minetest.conf', '/ffp/etc/luanti/minetest.conf', '/ffp/share/minetest/minetest.conf'),
+    'games_path': ('/ffp/share/luanti/games', '/ffp/share/minetest/games', '/ffp/games'),
+    'worlds_path': ('/ffp/var/luanti/worlds', '/ffp/var/minetest/worlds', '/ffp/worlds'),
+    'mods_path': ('/ffp/share/luanti/mods', '/ffp/share/minetest/mods', '/ffp/mods'),
+    'skins_path': ('/ffp/share/luanti/skins', '/ffp/share/minetest/skins', '/ffp/skins'),
+    'user_path': ('/ffp/var/luanti/user', '/ffp/var/minetest/user'),
+}
 CATEGORY_FIELDS = {
     'games': 'games_path',
     'worlds': 'worlds_path',
@@ -133,36 +152,13 @@ class LuantiManager(object):
             os.chmod(self._luanti_state(), 0o700)
 
     def _defaults(self, find_binary):
-        def first_file(candidates):
-            for path in candidates:
-                if os.path.isfile(path) and not os.path.islink(path):
-                    return path
-            return candidates[0]
-        def first_dir(candidates):
-            for path in candidates:
-                if os.path.isdir(path) and not os.path.islink(path):
-                    return path
-            return candidates[0]
-        binary = first_file(['/ffp/bin/luantiserver', '/ffp/bin/minetestserver', '/ffp/bin/luanti', '/ffp/bin/minetest'])
-        if find_binary:
-            for name in ('luantiserver', 'minetestserver', 'luanti', 'minetest'):
-                found = find_binary(name)
-                if found and os.path.isfile(found) and os.access(found, os.X_OK):
-                    binary = found
-                    break
-        return {
-            'binary_path': binary,
-            'config_path': first_file(['/ffp/etc/minetest.conf', '/ffp/etc/luanti/minetest.conf', '/ffp/share/minetest/minetest.conf']),
-            'games_path': first_dir(['/ffp/share/luanti/games', '/ffp/share/minetest/games', '/ffp/games']),
-            'worlds_path': first_dir(['/ffp/var/luanti/worlds', '/ffp/var/minetest/worlds', '/ffp/worlds']),
-            'mods_path': first_dir(['/ffp/share/luanti/mods', '/ffp/share/minetest/mods', '/ffp/mods']),
-            'skins_path': first_dir(['/ffp/share/luanti/skins', '/ffp/share/minetest/skins', '/ffp/skins']),
-            'user_path': first_dir(['/ffp/var/luanti/user', '/ffp/var/minetest/user']),
+        return dict(SCREENSHOT_PATH_DEFAULTS, **{
+            'path_defaults_version': PATH_DEFAULTS_VERSION,
             'run_as_user': '',
             'selected_world': '',
             'port': 30000,
             'bind_address': '',
-        }
+        })
 
     def _luanti_state(self):
         return os.path.join(self.state_root, 'luanti')
@@ -184,6 +180,12 @@ class LuantiManager(object):
                 return
             merged = dict(self.preferences)
             merged.update(supplied)
+            stored_path_version = supplied.get('path_defaults_version', 0)
+            if not isinstance(stored_path_version, int) or stored_path_version < PATH_DEFAULTS_VERSION:
+                for field, legacy_values in LEGACY_PATH_DEFAULTS.items():
+                    if supplied.get(field) in legacy_values:
+                        merged[field] = self.preferences[field]
+                merged['path_defaults_version'] = PATH_DEFAULTS_VERSION
             self.preferences = self._validate_preferences(merged)
         except (OSError, ValueError, TypeError):
             # A malformed preferences file must not prevent the whole WebUI from starting.
@@ -194,7 +196,7 @@ class LuantiManager(object):
         for field in ('binary_path', 'config_path', 'games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path'):
             raw = values.get(field, result[field])
             result[field] = self.validate_path(raw, allow_missing=True, allow_root=False)
-        data_roots = [(field, result[field]) for field in ('games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path')]
+        data_roots = [(field, os.path.realpath(result[field])) for field in ('games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path')]
         for index, (field, path) in enumerate(data_roots):
             for other_field, other in data_roots[index + 1:]:
                 try:
@@ -230,7 +232,9 @@ class LuantiManager(object):
         clean = os.path.normpath(raw)
         if not allow_root and clean == '/':
             raise ValueError('The root directory cannot be used as a Luanti path')
-        if clean == self.state_root or clean.startswith(self.state_root.rstrip(os.sep) + os.sep):
+        resolved = os.path.realpath(clean)
+        state_root = os.path.realpath(self.state_root)
+        if resolved == state_root or resolved.startswith(state_root.rstrip(os.sep) + os.sep):
             raise ValueError('Luanti data paths may not overlap WebUI internal state')
         current = os.path.sep
         missing = False
@@ -245,8 +249,8 @@ class LuantiManager(object):
                 continue
             if missing:
                 raise ValueError('Path contains an existing component below a missing parent')
-            if stat.S_ISLNK(st.st_mode):
-                raise ValueError('Symlinked Luanti paths are not accepted')
+            # Configured paths may pass through symlinked home directories on FFP.
+            # Internal-state overlap is checked against the resolved path above.
         if not allow_missing and not os.path.exists(clean):
             raise ValueError('Path does not exist')
         return clean
@@ -306,14 +310,14 @@ class LuantiManager(object):
         return sorted(result, key=lambda item: (item['name'].lower(), item['uid']))
 
     def _account_access(self, path, entry, groups, needed):
-        clean = os.path.normpath(path)
+        clean = os.path.realpath(os.path.normpath(path))
         components = clean.strip(os.sep).split(os.sep) if clean != os.sep else []
         current = os.sep
         for index, part in enumerate(components):
             current = os.path.join(current, part)
             st = os.lstat(current)
             if stat.S_ISLNK(st.st_mode):
-                raise ValueError('Luanti service paths may not contain symlinks')
+                raise ValueError('Resolved Luanti service path unexpectedly contains a symlink')
             final = index == len(components) - 1
             if not final or stat.S_ISDIR(st.st_mode):
                 required = 1  # execute/search permission on each parent directory
@@ -425,8 +429,8 @@ class LuantiManager(object):
         data = ('\n'.join(lines).rstrip() + '\n').encode('utf-8')
         parent = os.path.dirname(path)
         os.makedirs(parent, mode=0o755, exist_ok=True)
-        if os.path.islink(parent) or os.path.islink(path):
-            raise ValueError('Luanti config path may not be a symlink')
+        if os.path.islink(path):
+            raise ValueError('Luanti config file may not be a symlink')
         _write_atomic(path, data, 0o600)
         self.preferences['port'] = port
         self.preferences['bind_address'] = bind_address
@@ -923,7 +927,7 @@ class LuantiManager(object):
                     'log_path': '', 'paths': self._path_status(), 'note': 'Demo data only; the NAS and any Luanti server are not inspected.'}
         record = self._process_record()
         binary = self.preferences['binary_path']
-        binary_available = os.path.isfile(binary) and not os.path.islink(binary) and os.access(binary, os.X_OK)
+        binary_available = os.path.isfile(binary) and os.access(binary, os.X_OK)
         worlds = {item['name'] for item in self.list_category('worlds')}
         selected = self.preferences.get('selected_world', '')
         config = self.read_config()
@@ -1153,7 +1157,7 @@ class LuantiManager(object):
                 raise ValueError('Luanti server is already running')
             entry, groups = self._account_entry(self.preferences.get('run_as_user', ''))
             binary = self.validate_path(self.preferences['binary_path'], allow_missing=False)
-            st = os.lstat(binary)
+            st = os.stat(binary)
             if not stat.S_ISREG(st.st_mode) or not os.access(binary, os.X_OK):
                 raise ValueError('Configured Luanti binary is not an executable regular file')
             self._account_access(binary, entry, groups, os.X_OK)
@@ -1172,8 +1176,6 @@ class LuantiManager(object):
             if not os.path.exists(user_path):
                 parent = os.path.dirname(user_path)
                 os.makedirs(parent, mode=0o755, exist_ok=True)
-                if os.path.islink(parent):
-                    raise ValueError('Luanti user-data parent may not be a symlink')
                 os.mkdir(user_path, 0o700)
                 os.chown(user_path, entry.pw_uid, entry.pw_gid)
             if not os.path.isdir(user_path):
