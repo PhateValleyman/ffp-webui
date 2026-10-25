@@ -33,7 +33,7 @@
       <button class="nav-item" data-view="terminal"><span class="nav-icon">&gt;_</span>Terminál</button>
       <button class="nav-item" data-view="adb"><span class="nav-icon">▣</span>ADB zařízení</button>
       <button class="nav-item nav-power" data-view="power"><span class="nav-icon">⏻</span>Restart / vypnutí</button>
-      <div class="sidebar-foot"><span>WebUI 0.9.1 · Python</span><span id="server-address">Adresa se načítá</span></div>
+      <div class="sidebar-foot"><span>WebUI 0.9.2 · Python</span><span id="server-address">Adresa se načítá</span></div>
     </nav>
 
     <main id="main-content" tabindex="-1">
@@ -72,14 +72,14 @@
             <label>Cesta k modům<input id="luanti-mods-path" required placeholder="/ffp/home/root/.minetest/mods"></label>
             <label>Cesta ke skinům (organizační)<input id="luanti-skins-path" required placeholder="/ffp/home/root/.minetest/skins"></label>
             <label>Cesta k uživatelským datům<input id="luanti-user-path" required placeholder="/ffp/home/root/.minetest/data"></label>
-            <label>Uživatel operačního systému<select id="luanti-run-as" required><option value="">Vyberte existující ne-root účet</option></select></label>
+            <label>Uživatel operačního systému<select id="luanti-run-as" required><option value="">Vyberte existující účet</option></select></label>
             <label>Aktivní svět<select id="luanti-world-select"><option value="">Vyberte svět</option></select></label>
             <label>UDP port<input id="luanti-port" type="number" min="1" max="65535" required></label>
             <label>Bind adresa<input id="luanti-bind" placeholder="Prázdné = všechny adresy"></label>
             <label class="luanti-config-label">Serverová konfigurace<textarea id="luanti-config-content" spellcheck="false" rows="12"></textarea></label>
             <div class="luanti-form-actions"><button id="luanti-paths-save" class="button" type="button">Uložit pouze cesty</button><button class="button button-primary" type="submit">Uložit kompletní nastavení</button><button id="luanti-prepare-owner" class="button button-warning" type="button">Připravit vlastníka světa</button></div>
           </form>
-          <p class="muted">Server nikdy neběží jako root. Vyberte existující ne-root účet, který smí číst hry/mody a zapisovat do světa a uživatelských dat. Tato karta systémové účty nevytváří ani neupravuje. Pokud je svět root-owned, lze po kontrole explicitně změnit vlastníka všech souborů vybraného světa.</p>
+          <p class="muted">Luanti lze spustit pod vybraným existujícím systémovým účtem včetně root. Tato karta systémové účty nevytváří ani neupravuje. Pokud je svět root-owned, lze po kontrole explicitně změnit vlastníka všech souborů vybraného světa.</p>
         </article>
         <div class="content-grid section-gap">
           <article class="card"><div class="card-heading"><div><h2>Hry</h2><p class="muted" id="luanti-games-note">Načítám…</p></div></div><div id="luanti-games-list" class="luanti-list"></div></article>

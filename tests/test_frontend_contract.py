@@ -77,6 +77,12 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('id="luanti-paths-save"', self.html)
         self.assertIn("path == '/api/luanti/paths' and self.command == 'POST'", self.backend)
         self.assertIn('def luanti_paths_save(self):', self.backend)
+        start = self.backend.index('def luanti_paths_save(self):')
+        end = self.backend.index('def luanti_config_save(self):', start)
+        paths_handler = self.backend[start:end]
+        self.assertIn('update_paths_only(paths)', paths_handler)
+        self.assertIn('if not isinstance(data, dict)', paths_handler)
+        self.assertIn('isinstance(exc, OSError)', self.backend)
         start = self.js.index('async function saveLuantiPaths()')
         end = self.js.index("$('#luanti-paths-save').addEventListener", start)
         path_save = self.js[start:end]

@@ -1,8 +1,13 @@
-# FFP WebUI 0.9.1 — Zyxel NSA320
+# FFP WebUI 0.9.2 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.1 nebyl nainstalován ani otestován na NAS.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Balík 0.9.2 nebyl nainstalován ani otestován na NAS.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.9.2
+
+- Luanti lze spustit pod vybraným existujícím systémovým účtem včetně `root`.
+- **Uložit pouze cesty** ověřuje a ukládá jen sedm cest; nevyžaduje zvolenou hru, svět ani servisní účet. Chyba při zápisu ponechá dosavadní nastavení beze změny a běžné chyby souborového systému se zobrazí s konkrétním důvodem.
 
 ## Novinky v 0.9.1
 
@@ -17,8 +22,8 @@
 - Nová karta spravuje jednu dedikovanou instanci: start/stop/restart, log, port, bind adresu, konfiguraci a cesty pro hry, světy, mody, skiny a uživatelská data. Konfigurace ani cesty nelze měnit za běhu; citlivé hodnoty v konfiguračním souboru zůstávají při úpravě maskované.
 - Umožňuje vytvářet a vybírat světy, nastavovat jejich hru, povolovat/zakazovat mody, zobrazit bezpečně formátované `README.md` nebo historický překlep `REDADME.md`, importovat `.tar.gz`/`.tgz`/`.zip` obsah a vytvářet/stahovat zálohy `.tar.gz`. Import vyžaduje jedinou kořenovou složku, nikdy nepřepisuje existující obsah a limituje upload i rozbalení na 512 MiB a 5 000 položek.
 - Karta vypisuje auth záznamy včetně offline hráčů pro SQLite3 nebo legacy `auth.txt`. Přidání vytvoří účet bez hesla s výslovným potvrzením; před veřejným spuštěním se musí heslo nastavit přímo v Luanti. Odebrání smaže jen autentizační/oprávňovací záznam a ponechá inventář i pozici k obnově. Úprava hodnot a inventářů je budoucí rozšíření.
-- Hry a mody mohou spouštět kód. Proto server nikdy neběží jako root: vyžaduje již existující ne-root účet mimo root skupinu. WebUI účty NASu nevytváří ani neupravuje. Staré root-owned světy lze po samostatném přesném potvrzení převést na zvolený účet. Funkce hráčů pro `auth.sqlite` vyžaduje, aby statický Python obsahoval modul `sqlite3`.
-- NAS nemá v této práci ověřenou instalaci Luanti, její verzi, sqlite3 modul statického Pythonu ani vhodný ne-root účet; start může vyžadovat jejich samostatné nastavení. Technické zdroje a tyto limity jsou v [`references/luanti-management-sources.md`](references/luanti-management-sources.md).
+- Luanti běží pod vybraným existujícím systémovým účtem včetně `root`; WebUI účty NASu nevytváří ani neupravuje. Staré root-owned světy lze po samostatném přesném potvrzení převést na zvolený účet. Funkce hráčů pro `auth.sqlite` vyžaduje, aby statický Python obsahoval modul `sqlite3`.
+- NAS nemá v této práci ověřenou instalaci Luanti, její verzi ani sqlite3 modul statického Pythonu; dostupnost a chování serverové binárky je nutné ověřit na zařízení. Technické zdroje a tyto limity jsou v [`references/luanti-management-sources.md`](references/luanti-management-sources.md).
 
 ## Novinky v 0.8.0
 
@@ -48,7 +53,7 @@ Pokud se zobrazí varování o nesouladu verzí, po instalaci restartujte služb
 - Rclone kopírování na pozadí se stavem. Přímé ADB↔Rclone kopírování není podporováno; použijte NAS jako mezikrok. Přenosy mohou u velkých stromů vyžadovat dočasné místo.
 - Záložky cest uložené v `localStorage` aktuálního prohlížeče, náhled obrázků/videí do 32 MiB a až šest přepínatelných ANSI PTY relací (NAS, ADB, SSH/SFTP).
 - Správa ADB, služeb a autostartu, FFP prostředí, balíčků, root shell profilů, Tweaks cronu a původního Zyxel WebUI.
-- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0, cesty opraveny v 0.9.1; viz bezpečnostní omezení výše).
+- Správa Luanti serveru, jeho světů/her/modů, archivů a auth záznamů hráčů včetně offline účtů (zavedeno v 0.9.0; cesty opraveny v 0.9.1; účet root povolen v 0.9.2).
 
 ## Runtime a limity
 
@@ -58,7 +63,7 @@ Změna konfigurace remote je blokována během aktivního Rclone přenosu a běh
 
 ## Kontrola aktualizací
 
-Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.1 je předběžné vydání, dokud nebude instalační balík ověřen na NAS. Případná read-only kontrola má vybírat jen stabilní vydání a ověřovat SHA-256. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
+Automatická kontrola ani instalace nových verzí zatím není zapnutá. Veřejný zdrojový repozitář je [PhateValleyman/ffp-webui](https://github.com/PhateValleyman/ffp-webui) a vydání jsou na [GitHub Releases](https://github.com/PhateValleyman/ffp-webui/releases); verze 0.9.2 nebyla nainstalována ani spuštěna na NAS. Jedním klikem instalovat root balík by mělo přijít až po samostatném návrhu rollbacku/updateru: updater musí zastavit službu, zazálohovat celý payload i konfiguraci, použít `funpkg`, zkontrolovat lokální health a při chybě obnovit předchozí payload. Návrh je v [`references/next-release-design-notes.md`](references/next-release-design-notes.md).
 
 ## Build a lokální testy
 
@@ -70,14 +75,14 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.9.1-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.1-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.1-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.9.2-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.9.2-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.9.2-SHA256SUMS`, changelog a rozbalenou ukázku `dist/stage/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
 Před případnou ruční instalací zkontrolujte checksum a zazálohujte konfiguraci:
 
 ```sh
 cd /cesta/k/dist
-sha256sum -c ffp-webui-0.9.1-SHA256SUMS
-funpkg -i ./ffp-webui-0.9.1-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.9.2-SHA256SUMS
+funpkg -i ./ffp-webui-0.9.2-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
@@ -91,4 +96,4 @@ python3 dist/stage/ffp/bin/ffp-webui --config dist/stage/ffp/etc/ffp-webui/confi
 
 ## Stav ověření
 
-Sestavení, syntaxe, regresní testy a HTTP smoke test stage buildu se ověřují lokálně. Vydání 0.9.1 ani jeho instalační balík nebyly nainstalovány nebo spuštěny na NAS; NAS nebyl tímto úkolem změněn. Před spuštěním Luanti ověřte na zařízení dostupnost kompatibilní serverové binárky, `sqlite3` modul statického Pythonu, ne-root účtu a přístup k nastaveným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.
+Sestavení, syntaxe, regresní testy a HTTP smoke test stage buildu se ověřují lokálně. Vydání 0.9.2 ani jeho instalační balík nebyly nainstalovány nebo spuštěny na NAS; NAS nebyl tímto úkolem změněn. Před spuštěním Luanti ověřte dostupnost kompatibilní serverové binárky, `sqlite3` modulu statického Pythonu a přístup ke zvoleným cestám. Veřejný repozitář a release endpoint jsou dostupné na výše uvedených odkazech.

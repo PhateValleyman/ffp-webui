@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.9.1';
+const FRONTEND_VERSION = '0.9.2';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -258,7 +258,7 @@ async function loadLuanti() {
     const running = !!status.running;
     const demo = !!data.demo;
     const noticeParts = [data.note, status.note, demo ? 'Demo režim je pouze pro čtení.' : '',
-      !status.account_valid && !demo ? 'Pro spuštění vyberte existující ne-root účet, který není členem root skupiny.' : ''].filter(Boolean);
+      !status.account_valid && !demo ? 'Pro spuštění vyberte existující účet operačního systému.' : ''].filter(Boolean);
     notice.className = `notice ${demo ? 'notice-warn' : (!status.account_valid ? 'notice-warn' : 'notice-info')}`;
     notice.textContent = noticeParts.join(' ');
     $('#luanti-status').replaceChildren(
@@ -284,7 +284,7 @@ async function loadLuanti() {
       $('#luanti-port').value = data.config?.port || 30000;
       $('#luanti-bind').value = data.config?.bind_address || '';
       $('#luanti-config-content').value = data.config?.content || '';
-      const runAs = $('#luanti-run-as'); runAs.replaceChildren(new Option('Vyberte existující ne-root účet', ''));
+      const runAs = $('#luanti-run-as'); runAs.replaceChildren(new Option('Vyberte existující účet', ''));
       for (const account of (data.run_as_users || [])) runAs.add(new Option(`${account.name} (UID ${account.uid})`, account.name));
       const selectedRunAs = data.paths?.run_as_user || '';
       if (selectedRunAs && ![...runAs.options].some(option => option.value === selectedRunAs)) runAs.add(new Option(`${selectedRunAs} (nedostupný účet)`, selectedRunAs));
@@ -461,7 +461,7 @@ async function openLuantiReadme(kind, name) {
 $('#luanti-readme-close').addEventListener('click', () => { $('#luanti-readme-card').hidden = true; });
 $('#luanti-start').addEventListener('click', async () => {
   const phrase = 'START LUANTI';
-  if (prompt(`Spustí Luanti jako vybraný ne-root účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  if (prompt(`Spustí Luanti jako vybraný účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
   try { await luantiRequest('start', phrase); toast('Luanti server spuštěn.'); await loadLuanti(); }
   catch (error) { toast(error.message, true); }
 });

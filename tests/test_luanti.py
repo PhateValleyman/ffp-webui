@@ -1,5 +1,6 @@
 import json
 import os
+import pwd
 import sqlite3
 import sys
 import tarfile
@@ -98,7 +99,8 @@ class LuantiManagerTests(unittest.TestCase):
             find_binary=None,
         )
         values = {key: str(value) for key, value in self.paths.items()}
-        result = manager.update_paths(values)
+        with mock.patch.object(manager, '_account_entry', side_effect=AssertionError('path save must not inspect an account')):
+            result = manager.update_paths_only(values)
         self.assertEqual(result['selected_world'], '')
         self.assertEqual(result['run_as_user'], '')
         self.assertEqual({key: result[key] for key in values}, values)
@@ -110,6 +112,17 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertEqual({key: reloaded.preferences[key] for key in values}, values)
         self.assertEqual(reloaded.preferences['selected_world'], '')
         self.assertEqual(reloaded.preferences['run_as_user'], '')
+
+    def test_failed_path_save_keeps_memory_and_disk_preferences_unchanged(self):
+        old_preferences = dict(self.manager.preferences)
+        preferences_file = Path(self.manager.preferences_path)
+        old_file = preferences_file.read_bytes()
+        replacement = str(self.root / 'replacement' / 'luantiserver')
+        with mock.patch('ffp_webui_luanti._write_atomic', side_effect=OSError(30, 'Read-only file system')):
+            with self.assertRaisesRegex(OSError, 'Read-only file system'):
+                self.manager.update_paths_only({'binary_path': replacement})
+        self.assertEqual(self.manager.preferences, old_preferences)
+        self.assertEqual(preferences_file.read_bytes(), old_file)
 
     def test_path_default_migration_preserves_custom_directory(self):
         preferences = self.root / 'custom-preferences.json'
@@ -222,11 +235,39 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertEqual(result['filename'], 'REDADME.md')
         self.assertIn('<script>', result['content'])
 
-    def test_root_or_missing_accounts_are_not_accepted(self):
-        with self.assertRaises(ValueError):
-            self.manager._account_entry('root')
+    def test_root_is_an_available_and_valid_service_account(self):
+        entry, groups = self.manager._account_entry('root')
+        self.assertEqual(entry.pw_uid, 0)
+        self.assertIn(entry.pw_gid, groups)
+        self.assertIn('root', [account['name'] for account in self.manager.run_as_users()])
+        inaccessible = self.root / 'root-readable-only'
+        inaccessible.write_text('content')
+        inaccessible.chmod(0)
+        self.manager._account_access(str(inaccessible), entry, groups, os.R_OK | os.W_OK)
         with self.assertRaises(ValueError):
             self.manager._account_entry('user_that_does_not_exist_87233')
+
+    def test_start_passes_root_identity_to_the_luanti_process(self):
+        binary = self.paths['binary_path']
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o755)
+        self.manager.update_paths({'run_as_user': 'root', 'selected_world': 'main'})
+        process = mock.Mock(pid=43210)
+        process.poll.return_value = None
+        with mock.patch('ffp_webui_luanti.os.chown'), \
+             mock.patch('ffp_webui_luanti.subprocess.Popen', return_value=process) as popen, \
+             mock.patch('ffp_webui_luanti.time.sleep'), \
+             mock.patch.object(self.manager, '_proc_start_ticks', return_value=123):
+            result = self.manager.start(lambda: {})
+            with mock.patch('ffp_webui_luanti.os.setgroups') as setgroups, \
+                 mock.patch('ffp_webui_luanti.os.setgid') as setgid, \
+                 mock.patch('ffp_webui_luanti.os.setuid') as setuid:
+                popen.call_args.kwargs['preexec_fn']()
+        self.assertTrue(result['running'])
+        setgroups.assert_called_once_with([0])
+        setgid.assert_called_once_with(0)
+        setuid.assert_called_once_with(0)
+        self.assertEqual(pwd.getpwnam('root').pw_uid, 0)
 
     def test_frontend_exposes_safe_luanti_and_player_controls(self):
         html = (ROOT / 'internal' / 'webui' / 'assets' / 'index.html').read_text(encoding='utf-8')

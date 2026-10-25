@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2 — 2026-10-25
+
+- Luanti lze spustit pod vybraným existujícím systémovým účtem včetně `root`.
+- Ukládání cest má samostatnou validaci a nevyžaduje výběr hry, světa ani servisního účtu; při neúspěšném zápisu zůstane aktivní i uložené nastavení beze změny.
+- Běžné chyby souborového systému při ukládání se vracejí s konkrétním důvodem místo obecného hlášení.
+- Zachovány výchozí cesty z 0.9.1. Ověření cílového NASu nebylo provedeno.
+
 ## 0.9.1 — 2026-10-25
 
 - Rozděleno ukládání Luanti cest od úplného nastavení: cesty lze uložit před výběrem hry, světa nebo servisního účtu.

@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.9.1'
+WEBUI_VERSION = '0.9.2'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -1822,6 +1822,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, str(exc)[:500])
         if isinstance(exc, (RuntimeError, PermissionError)):
             return self._error(409, str(exc)[:500])
+        if isinstance(exc, OSError):
+            return self._error(500, 'Luanti filesystem operation failed: ' + str(exc)[:450])
         return self._error(500, 'Luanti operation failed safely')
 
     def luanti_snapshot(self):
@@ -1908,13 +1910,15 @@ class Handler(BaseHTTPRequestHandler):
     def luanti_paths_save(self):
         try:
             data = self.app.read_json(self, 16384)
+            if not isinstance(data, dict):
+                return self._error(400, 'Path-only settings must be a JSON object')
             if self.app.luanti.is_running():
                 return self._error(409, 'Stop the Luanti server before changing paths')
             paths = data.get('paths')
             allowed = set(('binary_path', 'config_path', 'games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path'))
             if not isinstance(paths, dict) or not paths or set(paths) - allowed:
                 return self._error(400, 'Path-only settings must contain Luanti paths, without account or world selection')
-            result = self.app.luanti.update_paths(paths)
+            result = self.app.luanti.update_paths_only(paths)
             self.app.audit(self, 'luanti-paths-save', 'paths', 'success')
             return write_json(self, 200, {'ok': True, 'paths': result})
         except Exception as exc:

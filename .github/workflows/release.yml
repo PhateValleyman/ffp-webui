@@ -40,6 +40,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "PKG_NAME=ffp-webui-${version}-python3.13-static-UNVERIFIED.txz" >> "$GITHUB_ENV"
+          echo "SRC_NAME=ffp-webui-${version}-source.tgz" >> "$GITHUB_ENV"
           echo "SUMS_NAME=ffp-webui-${version}-SHA256SUMS" >> "$GITHUB_ENV"
 
       - name: Run checks and tests
@@ -62,6 +63,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" \
               "dist/$PKG_NAME" \
+              "dist/$SRC_NAME" \
               "dist/$SUMS_NAME" \
               --title "FFP WebUI $VERSION" \
               --generate-notes

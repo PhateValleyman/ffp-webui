@@ -54,6 +54,7 @@ MAX_ARCHIVE_BYTES = 512 << 20
 MAX_ARCHIVE_FILES = 5000
 MAX_ARCHIVE_MEMBER = 256 << 20
 SECRET_MASK = '********'
+PATH_FIELDS = ('binary_path', 'config_path', 'games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path')
 
 
 def valid_name(value):
@@ -191,9 +192,9 @@ class LuantiManager(object):
             # A malformed preferences file must not prevent the whole WebUI from starting.
             return
 
-    def _validate_preferences(self, values):
-        result = dict(self.preferences)
-        for field in ('binary_path', 'config_path', 'games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path'):
+    def _validate_paths(self, values, base):
+        result = dict(base)
+        for field in PATH_FIELDS:
             raw = values.get(field, result[field])
             result[field] = self.validate_path(raw, allow_missing=True, allow_root=False)
         data_roots = [(field, os.path.realpath(result[field])) for field in ('games_path', 'worlds_path', 'mods_path', 'skins_path', 'user_path')]
@@ -205,6 +206,10 @@ class LuantiManager(object):
                     continue
                 if common == path or common == other:
                     raise ValueError('Luanti data paths may not overlap: %s and %s' % (field, other_field))
+        return result
+
+    def _validate_preferences(self, values):
+        result = self._validate_paths(values, self.preferences)
         selected = values.get('selected_world', '')
         if selected and not valid_name(selected):
             raise ValueError('Invalid selected world name')
@@ -255,16 +260,20 @@ class LuantiManager(object):
             raise ValueError('Path does not exist')
         return clean
 
-    def _save_preferences(self, values):
-        self.preferences = self._validate_preferences(values)
+    def _persist_preferences(self, values):
+        stored = dict(values)
         if not self.demo:
             # Refuse symlinked preference paths even though this file is outside user-managed roots.
             parent = os.path.dirname(self.preferences_path)
             os.makedirs(parent, mode=0o700, exist_ok=True)
             if os.path.islink(parent) or os.path.islink(self.preferences_path):
                 raise ValueError('Luanti preferences path may not be a symlink')
-            _write_atomic(self.preferences_path, json.dumps(self.preferences, sort_keys=True, indent=2).encode('utf-8') + b'\n', 0o600)
+            _write_atomic(self.preferences_path, json.dumps(stored, sort_keys=True, indent=2).encode('utf-8') + b'\n', 0o600)
+        self.preferences = stored
         return dict(self.preferences)
+
+    def _save_preferences(self, values):
+        return self._persist_preferences(self._validate_preferences(values))
 
     def update_paths(self, values):
         if not isinstance(values, dict):
@@ -279,28 +288,38 @@ class LuantiManager(object):
             self._account_entry(values['run_as_user'])
         return self._save_preferences(updated)
 
+    def update_paths_only(self, values):
+        if not isinstance(values, dict) or not values:
+            raise ValueError('Path settings object is required')
+        if set(values) - set(PATH_FIELDS):
+            raise ValueError('Path-only settings may contain Luanti paths only')
+        updated = dict(self.preferences)
+        updated.update(values)
+        validated = self._validate_paths(updated, updated)
+        return self._persist_preferences(validated)
+
     def _account_entry(self, name):
         if not isinstance(name, str) or not name:
-            raise ValueError('Choose an existing non-root Luanti service account')
+            raise ValueError('Choose an existing Luanti service account')
         try:
             entry = pwd.getpwnam(name)
         except KeyError:
             raise ValueError('The selected Luanti service account does not exist')
-        if entry.pw_uid <= 0:
-            raise ValueError('Luanti must run as an existing non-root account')
+        if entry.pw_uid < 0:
+            raise ValueError('Luanti must run as an existing operating-system account')
         groups = set([entry.pw_gid])
         try:
             groups.update(group.gr_gid for group in grp.getgrall() if name in group.gr_mem)
         except Exception:
             pass
-        if 0 in groups:
+        if entry.pw_uid != 0 and 0 in groups:
             raise ValueError('Luanti service account may not belong to the root group')
         return entry, groups
 
     def run_as_users(self):
         result = []
         for entry in pwd.getpwall():
-            if entry.pw_uid <= 0:
+            if entry.pw_uid < 0:
                 continue
             try:
                 self._account_entry(entry.pw_name)
@@ -318,6 +337,8 @@ class LuantiManager(object):
             st = os.lstat(current)
             if stat.S_ISLNK(st.st_mode):
                 raise ValueError('Resolved Luanti service path unexpectedly contains a symlink')
+            if entry.pw_uid == 0:
+                continue  # Root uses normal POSIX privilege overrides; retain path/symlink checks.
             final = index == len(components) - 1
             if not final or stat.S_ISDIR(st.st_mode):
                 required = 1  # execute/search permission on each parent directory
