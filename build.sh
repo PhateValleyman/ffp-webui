@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
-VERSION=${VERSION:-0.8.0}
+VERSION=${VERSION:-0.9.0}
 
 case "$VERSION" in
     ''|*[!0-9A-Za-z._-]*)
@@ -31,6 +31,7 @@ mkdir -p "$STAGE/ffp/bin" \
          "$STAGE/ffp/share/ffp-webui/assets"
 cp "$ROOT/ffp/ffp/bin/ffp-webui" "$STAGE/ffp/bin/ffp-webui"
 cp "$ROOT/ffp/ffp/bin/ffp_webui_rclone.py" "$STAGE/ffp/bin/ffp_webui_rclone.py"
+cp "$ROOT/ffp/ffp/bin/ffp_webui_luanti.py" "$STAGE/ffp/bin/ffp_webui_luanti.py"
 cp "$ROOT/ffp/ffp/start/ffp-webui.sh" "$STAGE/ffp/start/ffp-webui.sh"
 cp "$ROOT/ffp/ffp/etc/ffp-webui/config.json" "$STAGE/ffp/etc/ffp-webui/config.json"
 cp "$ROOT/internal/webui/assets/index.html" "$ROOT/internal/webui/assets/style.css" \
@@ -40,6 +41,7 @@ cp "$ROOT/internal/webui/assets/index.html" "$ROOT/internal/webui/assets/style.c
 # Keep the server executable, startup hook executable, and config root-readable.
 chmod 0755 "$STAGE/ffp/bin/ffp-webui" "$STAGE/ffp/start/ffp-webui.sh"
 chmod 0644 "$STAGE/ffp/bin/ffp_webui_rclone.py" \
+           "$STAGE/ffp/bin/ffp_webui_luanti.py" \
            "$STAGE/ffp/etc/ffp-webui/config.json" \
            "$STAGE/ffp/share/ffp-webui/assets/index.html" \
            "$STAGE/ffp/share/ffp-webui/assets/style.css" \
@@ -56,7 +58,8 @@ cd "$ROOT"
 tar --exclude='__pycache__' --exclude='*.pyc' -czf "$SRC" \
     README.md build.sh go.mod cmd internal ffp tests \
     references/rclone-webui-integration-research.md \
-    references/next-release-design-notes.md
+    references/next-release-design-notes.md \
+    references/luanti-management-sources.md
 
 # Show artifact checksums, sizes, and staged entry points for review.
 cd "$DIST"

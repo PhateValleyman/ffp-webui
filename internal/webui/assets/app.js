@@ -8,8 +8,9 @@ let envRevealed = false;
 let accountData = null;
 let editingUser = null;
 let passwordUser = '';
+let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.8.0';
+const FRONTEND_VERSION = '0.9.0';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -243,6 +244,290 @@ async function manageService(action, name) {
     await loadServices();
   } catch (error) { toast(error.message, true); }
 }
+
+function luantiRequest(action, confirmText) {
+  return post('/api/luanti/action', { action, confirm: confirmText });
+}
+async function loadLuanti() {
+  const notice = $('#luanti-notice');
+  try {
+    const data = await api('/api/luanti');
+    const firstLoad = !luantiSnapshot;
+    luantiSnapshot = data;
+    const status = data.status || {};
+    const running = !!status.running;
+    const demo = !!data.demo;
+    const noticeParts = [data.note, status.note, demo ? 'Demo režim je pouze pro čtení.' : '',
+      !status.account_valid && !demo ? 'Pro spuštění vyberte existující ne-root účet, který není členem root skupiny.' : ''].filter(Boolean);
+    notice.className = `notice ${demo ? 'notice-warn' : (!status.account_valid ? 'notice-warn' : 'notice-info')}`;
+    notice.textContent = noticeParts.join(' ');
+    $('#luanti-status').replaceChildren(
+      statCard('Proces', running ? 'Běží' : 'Vypnutý', running ? `PID ${status.pid || '—'}` : 'Luanti server'),
+      statCard('Binárka', status.binary_available ? 'Nalezena' : 'Nenalezena', status.binary_path || 'Cesta není nastavena'),
+      statCard('Svět', status.selected_world || 'Nevybrán', status.world_exists ? 'Existuje' : 'Není připraven'),
+      statCard('Síť', String(status.port || data.config?.port || '—'), status.bind_address || 'bind: všechny adresy')
+    );
+    $('#luanti-server-meta').textContent = running ? `Spravovaný proces PID ${status.pid}; log ${status.log_path || 'nedostupný'}.` : 'Server je vypnutý; změny konfigurace, importy a zálohy lze provádět.';
+    $('#luanti-start').disabled = demo || running || !status.binary_available || !status.world_exists || !status.account_valid;
+    $('#luanti-stop').disabled = demo || !running;
+    $('#luanti-restart').disabled = demo || !running;
+    const form = $('#luanti-settings-form');
+    const canEdit = !demo && !running;
+    $('#luanti-settings-form button[type="submit"]').disabled = !canEdit;
+    $('#luanti-prepare-owner').disabled = !canEdit || !status.selected_world || !status.run_as_user;
+    if (firstLoad || !form.contains(document.activeElement)) {
+      for (const [field, id] of Object.entries({
+        binary_path: 'luanti-binary-path', config_path: 'luanti-config-path', games_path: 'luanti-games-path',
+        worlds_path: 'luanti-worlds-path', mods_path: 'luanti-mods-path', skins_path: 'luanti-skins-path', user_path: 'luanti-user-path'
+      })) $(`#${id}`).value = data.paths?.[field] || '';
+      $('#luanti-port').value = data.config?.port || 30000;
+      $('#luanti-bind').value = data.config?.bind_address || '';
+      $('#luanti-config-content').value = data.config?.content || '';
+      const runAs = $('#luanti-run-as'); runAs.replaceChildren(new Option('Vyberte existující ne-root účet', ''));
+      for (const account of (data.run_as_users || [])) runAs.add(new Option(`${account.name} (UID ${account.uid})`, account.name));
+      const selectedRunAs = data.paths?.run_as_user || '';
+      if (selectedRunAs && ![...runAs.options].some(option => option.value === selectedRunAs)) runAs.add(new Option(`${selectedRunAs} (nedostupný účet)`, selectedRunAs));
+      runAs.value = selectedRunAs;
+    }
+    const worldSelect = $('#luanti-world-select');
+    const selectedWorld = data.paths?.selected_world || '';
+    worldSelect.replaceChildren(new Option('Vyberte svět', ''));
+    for (const world of (data.worlds || [])) worldSelect.add(new Option(`${world.name}${world.gameid ? ` · ${world.gameid}` : ''}`, world.name));
+    worldSelect.value = selectedWorld;
+    const gameSelect = $('#luanti-new-world-game'); gameSelect.replaceChildren();
+    for (const game of (data.games || [])) gameSelect.add(new Option(`${game.title || game.name} (${game.name})`, game.name));
+    const frozen = demo || running;
+    for (const selector of ['#luanti-world-form button', '#luanti-import-form button', '#luanti-player-form button']) $(selector).disabled = frozen;
+    worldSelect.disabled = demo || running;
+    renderLuantiItems('games', data.games || []);
+    renderLuantiItems('worlds', data.worlds || []);
+    renderLuantiItems('mods', data.mods || []);
+    renderLuantiItems('skins', data.skins || []);
+    renderLuantiItems('userdata', data.userdata || []);
+    $('#luanti-games-note').textContent = `${(data.games || []).length} her`;
+    $('#luanti-worlds-note').textContent = `${(data.worlds || []).length} světů`;
+    await Promise.all([loadLuantiPlayers(), loadLuantiBackups()]);
+  } catch (error) {
+    notice.className = 'notice notice-danger'; notice.textContent = error.message;
+    toast(error.message, true);
+  }
+}
+function renderLuantiItems(kind, items) {
+  const ids = { games: 'luanti-games-list', worlds: 'luanti-worlds-list', mods: 'luanti-mods-list', skins: 'luanti-skins-list', userdata: 'luanti-userdata-list' };
+  const box = $(`#${ids[kind]}`); box.replaceChildren();
+  if (!items.length) { box.append(node('div', 'Žádné položky v nastavené cestě.', 'empty-state')); return; }
+  for (const item of items) {
+    const row = node('div', undefined, 'luanti-row');
+    const info = node('div', undefined, 'luanti-item-info');
+    info.append(node('strong', item.title || item.name));
+    const metadata = [item.gameid ? `hra: ${item.gameid}` : '', item.enabled === true ? 'mod povolen' : item.enabled === false ? 'mod vypnut' : '', item.has_readme ? 'README dostupné' : '', item.kind === 'file' ? formatBytes(item.size) : ''].filter(Boolean).join(' · ');
+    if (metadata) info.append(node('span', metadata, 'muted'));
+    info.append(node('code', item.path || item.name, 'luanti-item-path'));
+    const actions = node('div', undefined, 'actions');
+    if (item.has_readme) {
+      const readme = node('button', 'README', 'button button-quiet'); readme.type = 'button'; readme.addEventListener('click', () => openLuantiReadme(kind, item.name)); actions.append(readme);
+    }
+    if (kind === 'worlds') {
+      const select = node('button', item.name === luantiSnapshot?.paths?.selected_world ? 'Aktivní svět' : 'Vybrat', 'button button-quiet');
+      select.type = 'button'; select.disabled = item.name === luantiSnapshot?.paths?.selected_world || luantiSnapshot?.status?.running || luantiSnapshot?.demo;
+      select.addEventListener('click', () => chooseLuantiWorld(item.name)); actions.append(select);
+      const game = node('select'); game.setAttribute('aria-label', `Hra pro svět ${item.name}`);
+      for (const gameItem of (luantiSnapshot?.games || [])) game.add(new Option(`${gameItem.name}`, gameItem.name));
+      game.value = item.gameid || '';
+      const setGame = node('button', 'Nastavit hru', 'button button-quiet'); setGame.type = 'button'; setGame.disabled = luantiSnapshot?.status?.running || luantiSnapshot?.demo;
+      setGame.addEventListener('click', () => setLuantiWorldGame(item.name, game.value)); actions.append(game, setGame);
+    }
+    if (kind === 'mods') {
+      const toggle = node('button', item.enabled ? 'Zakázat' : 'Povolit', 'button button-quiet'); toggle.type = 'button'; toggle.disabled = luantiSnapshot?.status?.running || luantiSnapshot?.demo || !luantiSnapshot?.paths?.selected_world;
+      toggle.addEventListener('click', () => toggleLuantiMod(item.name, !item.enabled)); actions.append(toggle);
+    }
+    if (kind !== 'userdata') {
+      const backup = node('button', 'Zálohovat', 'button button-quiet'); backup.type = 'button'; backup.disabled = luantiSnapshot?.status?.running || luantiSnapshot?.demo; backup.addEventListener('click', () => backupLuantiItem(kind, item.name)); actions.append(backup);
+      const remove = node('button', 'Smazat', 'button button-danger'); remove.type = 'button'; remove.disabled = luantiSnapshot?.status?.running || luantiSnapshot?.demo || (kind === 'worlds' && item.name === luantiSnapshot?.paths?.selected_world); remove.addEventListener('click', () => deleteLuantiItem(kind, item.name)); actions.append(remove);
+    }
+    row.append(info, actions); box.append(row);
+  }
+}
+async function loadLuantiPlayers() {
+  const box = $('#luanti-players-list'); box.replaceChildren();
+  try {
+    const data = await api('/api/luanti/players');
+    const actionsDisabled = !!luantiSnapshot?.demo || !!luantiSnapshot?.status?.running || !data.available;
+    $('#luanti-player-form button[type="submit"]').disabled = actionsDisabled;
+    $('#luanti-players-note').textContent = `${data.backend || 'Auth databáze není dostupná'}${data.available ? ` · ${(data.players || []).length} záznamů` : ''}${data.note ? ` · ${data.note}` : ''}`;
+    if (!data.players?.length) { box.append(node('div', data.note || 'Ve vybraném světě nejsou hráči.', 'empty-state')); return; }
+    for (const player of data.players) {
+      const row = node('div', undefined, 'luanti-row'); const info = node('div', undefined, 'luanti-item-info');
+      info.append(node('strong', player.name));
+      const meta = [player.password_set ? 'heslo nastaveno' : 'bez hesla', player.last_login ? `poslední přihlášení: ${new Date(player.last_login * 1000).toLocaleString()}` : 'offline / čas není v tomto backendu dostupný', (player.privileges || []).length ? `práva: ${player.privileges.join(', ')}` : 'bez zvláštních práv'].join(' · ');
+      info.append(node('span', meta, 'muted'));
+      const actions = node('div', undefined, 'actions'); const remove = node('button', 'Odebrat účet', 'button button-danger'); remove.type = 'button'; remove.disabled = actionsDisabled;
+      remove.addEventListener('click', () => deleteLuantiPlayer(player.name)); actions.append(remove); row.append(info, actions); box.append(row);
+    }
+  } catch (error) { $('#luanti-players-note').textContent = error.message; }
+}
+async function loadLuantiBackups() {
+  const box = $('#luanti-backups-list'); box.replaceChildren();
+  try {
+    const data = await api('/api/luanti/backups');
+    if (!data.backups?.length) { box.append(node('div', 'Zatím nejsou vytvořené zálohy.', 'empty-state')); return; }
+    box.append(node('strong', 'Dostupné zálohy'));
+    for (const backup of data.backups) {
+      const row = node('div', undefined, 'luanti-row');
+      const info = node('div', undefined, 'luanti-item-info'); info.append(node('strong', backup.name), node('span', `${formatBytes(backup.size)} · ${new Date(backup.modified * 1000).toLocaleString()}`, 'muted'));
+      const download = node('a', 'Stáhnout', 'button button-quiet'); download.href = `/api/luanti/backup?name=${encodeURIComponent(backup.name)}`; download.setAttribute('download', backup.name);
+      row.append(info, download); box.append(row);
+    }
+  } catch (error) { box.append(node('div', error.message, 'empty-state')); }
+}
+async function chooseLuantiWorld(name) {
+  try { await post('/api/luanti/world', { action: 'select', name }); toast(`Vybrán svět ${name}.`); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+}
+async function setLuantiWorldGame(world, gameid) {
+  if (!gameid) return toast('Vyberte hru.', true);
+  try { await post('/api/luanti/world', { action: 'game', world, gameid }); toast(`Svět ${world} nyní používá hru ${gameid}.`); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+}
+async function toggleLuantiMod(name, enabled) {
+  try { await post('/api/luanti/mod', { name, enabled }); toast(`Mod ${name} ${enabled ? 'povolen' : 'zakázán'}.`); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+}
+async function backupLuantiItem(kind, name) {
+  if (!confirm(`Vytvořit tar.gz zálohu ${kind}/${name}? Server musí být vypnutý.`)) return;
+  try { const data = await post('/api/luanti/item/backup', { kind, name }); toast(`Záloha ${data.result.name} vytvořena.`); await loadLuantiBackups(); }
+  catch (error) { toast(error.message, true); }
+}
+async function deleteLuantiItem(kind, name) {
+  const phrase = `DELETE ${kind} ${name}`;
+  if (prompt(`Položka bude před smazáním zazálohována. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  try { await post('/api/luanti/item/delete', { kind, name, confirm: phrase }); toast(`${kind}/${name} smazáno; záloha je dostupná.`); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+}
+async function deleteLuantiPlayer(name) {
+  const phrase = `DELETE PLAYER ${name}`;
+  if (prompt(`Smaže auth a oprávňovací záznam; inventář a poloha zůstanou pro obnovu. Zadejte: ${phrase}`) !== phrase) return;
+  try { await post('/api/luanti/player', { action: 'delete', name, confirm: phrase }); toast(`Auth účet ${name} odebrán; světová data zůstala.`); await loadLuantiPlayers(); await loadLuantiBackups(); }
+  catch (error) { toast(error.message, true); }
+}
+function appendMarkdownInline(parent, text) {
+  const pattern = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*)/g;
+  let cursor = 0; let match;
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) parent.append(document.createTextNode(text.slice(cursor, match.index)));
+    if (match[2] && match[3]) {
+      try { const url = new URL(match[3]); if (url.protocol === 'http:' || url.protocol === 'https:') { const link = node('a', match[2]); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; parent.append(link); } else parent.append(document.createTextNode(match[0])); }
+      catch (_) { parent.append(document.createTextNode(match[0])); }
+    } else if (match[4]) parent.append(node('code', match[4]));
+    else if (match[5]) parent.append(node('strong', match[5]));
+    cursor = pattern.lastIndex;
+  }
+  if (cursor < text.length) parent.append(document.createTextNode(text.slice(cursor)));
+}
+function renderLuantiMarkdown(text) {
+  const box = $('#luanti-readme-body'); box.replaceChildren();
+  const lines = String(text || '').split(/\r?\n/); let paragraph = []; let list = null; let code = null;
+  const flushParagraph = () => { if (!paragraph.length) return; const p = node('p'); appendMarkdownInline(p, paragraph.join(' ')); box.append(p); paragraph = []; };
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      flushParagraph(); list = null;
+      if (code) { box.append(code); code = null; } else code = node('pre');
+      continue;
+    }
+    if (code) { code.textContent += `${line}\n`; continue; }
+    if (!line.trim()) { flushParagraph(); list = null; continue; }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading) { flushParagraph(); list = null; box.append(node(`h${heading[1].length}`, heading[2])); continue; }
+    const item = /^\s*[-*+]\s+(.+)$/.exec(line);
+    if (item) { flushParagraph(); if (!list) { list = node('ul'); box.append(list); } const li = node('li'); appendMarkdownInline(li, item[1]); list.append(li); continue; }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) { flushParagraph(); list = null; const block = node('blockquote'); appendMarkdownInline(block, quote[1]); box.append(block); continue; }
+    list = null; paragraph.push(line.trim());
+  }
+  flushParagraph();
+  if (code) box.append(code);
+}
+async function openLuantiReadme(kind, name) {
+  try {
+    const data = await api(`/api/luanti/readme?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`);
+    $('#luanti-readme-title').textContent = `${name} · README`;
+    $('#luanti-readme-meta').textContent = `${data.filename} · zobrazení bez spouštění HTML`;
+    renderLuantiMarkdown(data.content);
+    $('#luanti-readme-card').hidden = false;
+    $('#luanti-readme-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) { toast(error.message, true); }
+}
+$('#luanti-readme-close').addEventListener('click', () => { $('#luanti-readme-card').hidden = true; });
+$('#luanti-start').addEventListener('click', async () => {
+  const phrase = 'START LUANTI';
+  if (prompt(`Spustí Luanti jako vybraný ne-root účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  try { await luantiRequest('start', phrase); toast('Luanti server spuštěn.'); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-stop').addEventListener('click', async () => {
+  const phrase = 'STOP LUANTI';
+  if (prompt(`Zastavit Luanti server? Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  try { await luantiRequest('stop', phrase); toast('Luanti server zastaven.'); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-restart').addEventListener('click', async () => {
+  const phrase = 'RESTART LUANTI';
+  if (prompt(`Server se zastaví a znovu spustí. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  try { await luantiRequest('restart', phrase); toast('Luanti server restartován.'); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-log-refresh').addEventListener('click', async () => {
+  try { $('#luanti-log').textContent = await api('/api/luanti/log'); }
+  catch (error) { $('#luanti-log').textContent = error.message; }
+});
+$('#luanti-settings-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const paths = {
+    binary_path: $('#luanti-binary-path').value.trim(), config_path: $('#luanti-config-path').value.trim(),
+    games_path: $('#luanti-games-path').value.trim(), worlds_path: $('#luanti-worlds-path').value.trim(),
+    mods_path: $('#luanti-mods-path').value.trim(), skins_path: $('#luanti-skins-path').value.trim(),
+    user_path: $('#luanti-user-path').value.trim(), run_as_user: $('#luanti-run-as').value,
+    selected_world: $('#luanti-world-select').value
+  };
+  try {
+    await post('/api/luanti/config', { paths, content: $('#luanti-config-content').value,
+      port: Number($('#luanti-port').value), bind_address: $('#luanti-bind').value.trim() });
+    toast('Nastavení Luanti uloženo; server před startem ověří cestu a oprávnění.'); await loadLuanti();
+  } catch (error) { toast(error.message, true); }
+});
+$('#luanti-prepare-owner').addEventListener('click', async () => {
+  const world = $('#luanti-world-select').value; if (!world) return toast('Vyberte svět.', true);
+  const phrase = `PREPARE WORLD OWNER ${world}`;
+  if (prompt(`Rekurzivně změní vlastníka všech souborů světa na vybraný servisní účet. Pro potvrzení zadejte: ${phrase}`) !== phrase) return;
+  try { const result = await post('/api/luanti/permissions', { confirm: phrase }); toast(`Vlastník nastaven u ${result.result.entries} položek světa.`); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-world-select').addEventListener('change', async event => {
+  const name = event.currentTarget.value;
+  try { await post('/api/luanti/world', { action: 'select', name }); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-world-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  try { await post('/api/luanti/world', { action: 'create', name: $('#luanti-new-world').value.trim(), gameid: $('#luanti-new-world-game').value }); event.currentTarget.reset(); toast('Svět vytvořen a vybrán.'); await loadLuanti(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-import-form').addEventListener('submit', async event => {
+  event.preventDefault(); const file = $('#luanti-import-file').files[0]; if (!file) return;
+  const kind = $('#luanti-import-kind').value; const name = $('#luanti-import-name').value.trim();
+  if (!confirm(`Importovat ${file.name} jako ${kind}/${name}? Server musí být vypnutý a archiv může obsahovat spustitelný mod/game kód.`)) return;
+  try {
+    await api(`/api/luanti/item/upload?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, timeoutMs: 0 });
+    event.currentTarget.reset(); toast('Archiv bezpečně rozbalen a importován.'); await loadLuanti();
+  } catch (error) { toast(error.message, true); }
+});
+$('#luanti-player-form').addEventListener('submit', async event => {
+  event.preventDefault(); const name = $('#luanti-player-name').value.trim(); const phrase = `CREATE PLAYER ${name} WITHOUT PASSWORD`;
+  if (prompt(`Vytvoří offline auth záznam bez hesla. Nastavte heslo v Luanti před veřejným přístupem. Zadejte: ${phrase}`) !== phrase) return;
+  try { await post('/api/luanti/player', { action: 'add', name, confirm: phrase }); event.currentTarget.reset(); toast(`Hráč ${name} přidán bez hesla.`); await loadLuantiPlayers(); await loadLuantiBackups(); }
+  catch (error) { toast(error.message, true); }
+});
+$('#luanti-players-refresh').addEventListener('click', loadLuantiPlayers);
 
 async function loadEnv() {
   loadEnvProfiles();
@@ -2512,6 +2797,7 @@ $('#adb-editor-dialog').addEventListener('close', () => { adbEditorTarget = null
 async function refreshView(name) {
   if (name === 'overview') return loadOverview();
   if (name === 'services') return loadServices();
+  if (name === 'luanti') return loadLuanti();
   if (name === 'environment') return loadEnv();
   if (name === 'users') return loadUsers();
   if (name === 'packages') return loadPackages();

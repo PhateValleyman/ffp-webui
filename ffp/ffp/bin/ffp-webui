@@ -39,13 +39,14 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.8.0'
+WEBUI_VERSION = '0.9.0'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 from ffp_webui_rclone import RcloneBridge, normalize_remote_path
+from ffp_webui_luanti import LuantiManager
 ENV_FILE = '/ffp/etc/ffp-webui/environment'
 STATE_ROOT = '/ffp/var/ffp-webui'
 PACKAGE_DB_DIR = '/ffp/funpkg/installed'
@@ -1001,6 +1002,7 @@ class Backend(object):
         self.job_active = False
         self.terminal = TerminalManager()
         self.rclone = RcloneBridge(self, command_path, fixed_env, read_sshfs_mounts)
+        self.luanti = LuantiManager(state_root=STATE_ROOT, demo=self.demo, find_binary=command_path)
         self.audit_file = None
         if not self.demo:
             os.makedirs(STATE_ROOT, mode=0o700, exist_ok=True)
@@ -1506,6 +1508,54 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/health' and self.command == 'GET':
             return write_json(self, 200, {'ok': True, 'demo': self.app.demo,
                                           'authentication': 'disabled', 'version': WEBUI_VERSION})
+        if path == '/api/luanti' and self.command == 'GET':
+            return self.luanti_snapshot()
+        if path == '/api/luanti/log' and self.command == 'GET':
+            return self.luanti_log()
+        if path == '/api/luanti/readme' and self.command == 'GET':
+            return self.luanti_readme()
+        if path == '/api/luanti/players' and self.command == 'GET':
+            return self.luanti_players()
+        if path == '/api/luanti/backup' and self.command == 'GET':
+            return self.luanti_backup_download()
+        if path == '/api/luanti/backups' and self.command == 'GET':
+            return write_json(self, 200, {'backups': self.app.luanti.list_backups(), 'demo': self.app.demo})
+        if path == '/api/luanti/config' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_config_save()
+        if path == '/api/luanti/action' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_action()
+        if path == '/api/luanti/world' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_world_action()
+        if path == '/api/luanti/mod' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_mod_action()
+        if path == '/api/luanti/player' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_player_action()
+        if path == '/api/luanti/permissions' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_prepare_owner()
+        if path == '/api/luanti/item/upload' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_item_upload()
+        if path == '/api/luanti/item/backup' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_item_backup()
+        if path == '/api/luanti/item/delete' and self.command == 'POST':
+            if not self.app.require_live(self):
+                return
+            return self.luanti_item_delete()
         if path == '/api/terminal/start' and self.command == 'POST':
             if not self.app.require_live(self):
                 return
@@ -1758,6 +1808,244 @@ class Handler(BaseHTTPRequestHandler):
                                           'method': self.command, 'path': path,
                                           'server_version': WEBUI_VERSION})
         self._error(404, 'Not found')
+
+    def _luanti_error(self, exc):
+        if isinstance(exc, FileNotFoundError):
+            return self._error(404, str(exc)[:500])
+        if isinstance(exc, FileExistsError):
+            return self._error(409, str(exc)[:500])
+        if isinstance(exc, (ValueError, TypeError)):
+            return self._error(400, str(exc)[:500])
+        if isinstance(exc, (RuntimeError, PermissionError)):
+            return self._error(409, str(exc)[:500])
+        return self._error(500, 'Luanti operation failed safely')
+
+    def luanti_snapshot(self):
+        manager = self.app.luanti
+        if self.app.demo:
+            return write_json(self, 200, {
+                'demo': True,
+                'status': manager.status(),
+                'config': {'content': '# Ukázkové nastavení\nport = 30000\nbind_address = \n', 'port': 30000, 'bind_address': '', 'has_secrets': False},
+                'paths': dict(manager.preferences),
+                'run_as_users': [],
+                'games': [], 'worlds': [], 'mods': [], 'skins': [], 'userdata': [],
+                'note': 'Ukázková data; soubory NAS ani Luanti instalace se nečtou.'
+            })
+        try:
+            return write_json(self, 200, {
+                'demo': False,
+                'status': manager.status(),
+                'config': manager.read_config(),
+                'paths': dict(manager.preferences),
+                'run_as_users': manager.run_as_users(),
+                'games': manager.list_category('games'),
+                'worlds': manager.list_category('worlds'),
+                'mods': manager.list_category('mods'),
+                'skins': manager.list_category('skins'),
+                'userdata': manager.list_category('userdata'),
+                'note': ''
+            })
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_log(self):
+        try:
+            text = self.app.luanti.log_tail()
+            data = text.encode('utf-8', 'replace')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            if self.command != 'HEAD':
+                self.wfile.write(data)
+            return
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_readme(self):
+        query = parse_qs(urlsplit(self.path).query)
+        category = query.get('kind', [''])[0]
+        name = query.get('name', [''])[0]
+        try:
+            return write_json(self, 200, self.app.luanti.read_readme(category, name))
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_players(self):
+        if self.app.demo:
+            return write_json(self, 200, {'available': False, 'demo': True, 'backend': '', 'players': [],
+                                          'note': 'Ukázkový režim nečte ani nemění databázi hráčů.'})
+        try:
+            result = self.app.luanti.player_list()
+            result['demo'] = False
+            return write_json(self, 200, result)
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_backup_download(self):
+        query = parse_qs(urlsplit(self.path).query)
+        name = query.get('name', [''])[0]
+        try:
+            path = self.app.luanti.backup_path(name)
+            st = os.stat(path)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/gzip')
+            self.send_header('Content-Length', str(st.st_size))
+            self.send_header('Content-Disposition', 'attachment; filename="%s"' % name)
+            self.end_headers()
+            if self.command != 'HEAD':
+                with open(path, 'rb') as source:
+                    shutil.copyfileobj(source, self.wfile, 65536)
+            return
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_config_save(self):
+        try:
+            data = self.app.read_json(self, 3 << 20)
+            if self.app.luanti.is_running():
+                return self._error(409, 'Stop the Luanti server before changing paths or configuration')
+            paths = data.get('paths', {})
+            if paths:
+                self.app.luanti.update_paths(paths)
+            result = self.app.luanti.save_config(data.get('content'), data.get('port'), data.get('bind_address'),
+                                                 backup_callback=self.app.backup)
+            self.app.audit(self, 'luanti-config-save', result['path'], 'success')
+            return write_json(self, 200, {'ok': True, 'config': result, 'paths': dict(self.app.luanti.preferences)})
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_action(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            action = data.get('action')
+            phrases = {'start': 'START LUANTI', 'stop': 'STOP LUANTI', 'restart': 'RESTART LUANTI'}
+            if action not in phrases or data.get('confirm') != phrases[action]:
+                return self._error(400, 'An exact Luanti server confirmation is required')
+            if action == 'start':
+                result = self.app.luanti.start(fixed_env)
+            elif action == 'stop':
+                result = self.app.luanti.stop()
+            else:
+                result = self.app.luanti.restart(fixed_env)
+            self.app.audit(self, 'luanti-' + action, 'server', 'success')
+            return write_json(self, 200, {'ok': True, 'result': result, 'status': self.app.luanti.status()})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-action', 'server', 'failed')
+            return self._luanti_error(exc)
+
+    def luanti_world_action(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            action = data.get('action')
+            if action == 'create':
+                result = self.app.luanti.create_world(data.get('name'), data.get('gameid'))
+            elif action == 'select':
+                if self.app.luanti.is_running():
+                    return self._error(409, 'Stop the Luanti server before changing its selected world')
+                name = data.get('name', '')
+                if name:
+                    self.app.luanti._item_path('worlds', name)
+                self.app.luanti.update_paths({'selected_world': name})
+                result = {'selected_world': name}
+            elif action == 'game':
+                result = self.app.luanti.set_world_game(data.get('world'), data.get('gameid'))
+            elif action == 'prepare-owner':
+                result = self.app.luanti.prepare_selected_world()
+            else:
+                return self._error(400, 'Unknown Luanti world action')
+            self.app.audit(self, 'luanti-world-' + action, result.get('name') or result.get('world') or 'selection', 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-world-action', 'world', 'failed')
+            return self._luanti_error(exc)
+
+    def luanti_mod_action(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            result = self.app.luanti.toggle_mod(data.get('name'), data.get('enabled'))
+            self.app.audit(self, 'luanti-mod-toggle', result['name'], 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-mod-toggle', 'mod', 'failed')
+            return self._luanti_error(exc)
+
+    def luanti_player_action(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            action, name = data.get('action'), data.get('name')
+            if action == 'add':
+                if data.get('confirm') != 'CREATE PLAYER %s WITHOUT PASSWORD' % name:
+                    return self._error(400, 'Confirm that the new account will have no password')
+                result = self.app.luanti.player_add(name)
+            elif action == 'delete':
+                if data.get('confirm') != 'DELETE PLAYER %s' % name:
+                    return self._error(400, 'An exact player deletion confirmation is required')
+                result = self.app.luanti.player_delete(name)
+            else:
+                return self._error(400, 'Unknown Luanti player action')
+            self.app.audit(self, 'luanti-player-' + action, name, 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-player-action', 'player', 'failed')
+            return self._luanti_error(exc)
+
+    def luanti_prepare_owner(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            selected = self.app.luanti.preferences.get('selected_world', '')
+            if data.get('confirm') != 'PREPARE WORLD OWNER %s' % selected:
+                return self._error(400, 'An exact ownership-change confirmation is required')
+            result = self.app.luanti.prepare_selected_world()
+            self.app.audit(self, 'luanti-world-owner', selected, 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_item_upload(self):
+        query = parse_qs(urlsplit(self.path).query)
+        category = query.get('kind', [''])[0]
+        name = query.get('name', [''])[0]
+        upload_dir = os.path.join(self.app.luanti._luanti_state(), 'uploads')
+        archive_path = os.path.join(upload_dir, uuid.uuid4().hex + '.upload')
+        try:
+            if self.app.demo:
+                return self._error(423, 'Demo mode is read-only')
+            os.makedirs(upload_dir, mode=0o700, exist_ok=True)
+            self.app.stream_upload(self, archive_path, min(int(self.app.cfg.get('max_upload_bytes', 64 << 20)), 512 << 20))
+            result = self.app.luanti.import_archive(category, name, archive_path)
+            self.app.audit(self, 'luanti-import', category + '/' + name, 'success')
+            return write_json(self, 201, {'ok': True, 'result': result})
+        except Exception as exc:
+            self.app.audit(self, 'luanti-import', category + '/' + name, 'failed')
+            return self._luanti_error(exc)
+        finally:
+            try:
+                os.unlink(archive_path)
+            except OSError:
+                pass
+
+    def luanti_item_backup(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            result = self.app.luanti.backup_item(data.get('kind'), data.get('name'))
+            self.app.audit(self, 'luanti-backup', data.get('kind', '') + '/' + data.get('name', ''), 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            return self._luanti_error(exc)
+
+    def luanti_item_delete(self):
+        try:
+            data = self.app.read_json(self, 16384)
+            category, name = data.get('kind'), data.get('name')
+            if data.get('confirm') != 'DELETE %s %s' % (category, name):
+                return self._error(400, 'An exact Luanti deletion confirmation is required')
+            result = self.app.luanti.delete_item(category, name)
+            self.app.audit(self, 'luanti-delete', category + '/' + name, 'success')
+            return write_json(self, 200, {'ok': True, 'result': result})
+        except Exception as exc:
+            return self._luanti_error(exc)
 
     def system_info(self):
         if self.app.demo:

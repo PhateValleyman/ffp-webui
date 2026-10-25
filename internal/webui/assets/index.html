@@ -23,6 +23,7 @@
     <nav class="sidebar" aria-label="Sekce">
       <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span>Přehled</button>
       <button class="nav-item" data-view="services"><span class="nav-icon">⏵</span>Aplikace a služby</button>
+      <button class="nav-item" data-view="luanti"><span class="nav-icon">◆</span>Luanti server</button>
       <button class="nav-item" data-view="environment"><span class="nav-icon">⌘</span>FFP prostředí</button>
       <button class="nav-item" data-view="users"><span class="nav-icon">♙</span>Uživatelé NASu</button>
       <button class="nav-item" data-view="packages"><span class="nav-icon">▦</span>Balíčky</button>
@@ -32,7 +33,7 @@
       <button class="nav-item" data-view="terminal"><span class="nav-icon">&gt;_</span>Terminál</button>
       <button class="nav-item" data-view="adb"><span class="nav-icon">▣</span>ADB zařízení</button>
       <button class="nav-item nav-power" data-view="power"><span class="nav-icon">⏻</span>Restart / vypnutí</button>
-      <div class="sidebar-foot"><span>WebUI 0.8.0 · Python</span><span id="server-address">Adresa se načítá</span></div>
+      <div class="sidebar-foot"><span>WebUI 0.9.0 · Python</span><span id="server-address">Adresa se načítá</span></div>
     </nav>
 
     <main id="main-content" tabindex="-1">
@@ -51,6 +52,46 @@
         <div class="page-heading"><div><p class="eyebrow">PROCESY A START</p><h1>Aplikace a služby</h1><p class="subtitle">Ovládání spouštěcích skriptů v <code>/ffp/start</code>.</p></div><div class="actions"><button class="button" data-refresh="services">Obnovit seznam</button><button class="button button-primary" id="service-new" type="button">Přidat službu</button></div></div>
         <div class="notice notice-info">Barvy ukazují běh procesu a samostatně autostart. Stav procesu je odhad z <code>ps</code>; „Stop“ volá stop skript služby, nikoli libovolný PID. Skripty v <code>/ffp/start</code> běží jako root — jejich úprava je jen pro důvěryhodný kód; před uložením se vytvoří záloha.</div>
         <div class="card table-card"><div id="services-list" class="empty-state">Načítám služby…</div></div>
+      </section>
+
+      <section class="view" id="view-luanti">
+        <div class="page-heading"><div><p class="eyebrow">LUANTI DEDICATED SERVER</p><h1>Správa Luanti serveru</h1><p class="subtitle">Proces, konfigurace, hry, světy, mody, zálohy a účty hráčů.</p></div><button class="button" data-refresh="luanti" type="button">Obnovit</button></div>
+        <div id="luanti-notice" class="notice notice-info">Načítám dostupnost Luanti…</div>
+        <div id="luanti-status" class="stat-grid"></div>
+        <article class="card">
+          <div class="card-heading"><div><h2>Server</h2><p class="muted" id="luanti-server-meta">Zjišťuji stav…</p></div><div class="actions"><button id="luanti-start" class="button button-primary" type="button">Spustit</button><button id="luanti-stop" class="button button-warning" type="button">Vypnout</button><button id="luanti-restart" class="button button-warning" type="button">Restartovat</button></div></div>
+          <div class="actions"><button id="luanti-log-refresh" class="button button-quiet" type="button">Načíst log</button></div><pre id="luanti-log" class="luanti-log">Log zatím nebyl načten.</pre>
+        </article>
+        <article class="card section-gap">
+          <div class="card-heading"><div><h2>Nastavení serveru a cest</h2><p class="muted">Konfigurace se mění jen při vypnutém serveru. Cesty se validují proti symlinkům a překryvům.</p></div></div>
+          <form id="luanti-settings-form" class="luanti-form">
+            <label>Spustitelný soubor<input id="luanti-binary-path" required placeholder="/ffp/bin/luantiserver"></label>
+            <label>Konfigurační soubor<input id="luanti-config-path" required placeholder="/ffp/etc/luanti/minetest.conf"></label>
+            <label>Cesta ke hrám<input id="luanti-games-path" required></label>
+            <label>Cesta ke světům<input id="luanti-worlds-path" required></label>
+            <label>Cesta k modům<input id="luanti-mods-path" required></label>
+            <label>Cesta ke skinům (organizační)<input id="luanti-skins-path" required></label>
+            <label>Cesta k uživatelským datům<input id="luanti-user-path" required></label>
+            <label>Uživatel operačního systému<select id="luanti-run-as" required><option value="">Vyberte existující ne-root účet</option></select></label>
+            <label>Aktivní svět<select id="luanti-world-select"><option value="">Vyberte svět</option></select></label>
+            <label>UDP port<input id="luanti-port" type="number" min="1" max="65535" required></label>
+            <label>Bind adresa<input id="luanti-bind" placeholder="Prázdné = všechny adresy"></label>
+            <label class="luanti-config-label">Serverová konfigurace<textarea id="luanti-config-content" spellcheck="false" rows="12"></textarea></label>
+            <div class="luanti-form-actions"><button class="button button-primary" type="submit">Uložit konfiguraci a cesty</button><button id="luanti-prepare-owner" class="button button-warning" type="button">Připravit vlastníka světa</button></div>
+          </form>
+          <p class="muted">Server nikdy neběží jako root. Vyberte existující ne-root účet, který smí číst hry/mody a zapisovat do světa a uživatelských dat. Tato karta systémové účty nevytváří ani neupravuje. Pokud je svět root-owned, lze po kontrole explicitně změnit vlastníka všech souborů vybraného světa.</p>
+        </article>
+        <div class="content-grid section-gap">
+          <article class="card"><div class="card-heading"><div><h2>Hry</h2><p class="muted" id="luanti-games-note">Načítám…</p></div></div><div id="luanti-games-list" class="luanti-list"></div></article>
+          <article class="card"><div class="card-heading"><div><h2>Světy</h2><p class="muted" id="luanti-worlds-note">Načítám…</p></div></div><form id="luanti-world-form" class="luanti-inline-form"><label>Nový svět<input id="luanti-new-world" required maxlength="128" pattern="[A-Za-z0-9._-]+"></label><label>Hra<select id="luanti-new-world-game" required></select></label><button class="button button-primary" type="submit">Vytvořit svět</button></form><div id="luanti-worlds-list" class="luanti-list section-gap"></div></article>
+        </div>
+        <div class="content-grid section-gap">
+          <article class="card"><div class="card-heading"><div><h2>Mody</h2><p class="muted">Povolení se zapisuje do world.mt vybraného světa.</p></div></div><div id="luanti-mods-list" class="luanti-list"></div></article>
+          <article class="card"><div class="card-heading"><div><h2>Skins a uživatelská data</h2><p class="muted">Organizační přehled cest; při mazání userdata je záměrně vypnuté.</p></div></div><div id="luanti-skins-list" class="luanti-list"></div><div id="luanti-userdata-list" class="luanti-list section-gap"></div></article>
+        </div>
+        <article class="card section-gap"><div class="card-heading"><div><h2>Import obsahu</h2><p class="muted">Archiv .tar.gz/.tgz/.zip musí obsahovat právě jednu kořenovou složku; existující obsah se nepřepisuje. Import je povolen jen při vypnutém serveru.</p></div></div><form id="luanti-import-form" class="luanti-inline-form"><label>Typ<select id="luanti-import-kind"><option value="games">Hra</option><option value="worlds">Svět</option><option value="mods">Mod</option><option value="skins">Skin pack</option></select></label><label>Název cíle<input id="luanti-import-name" required maxlength="128" pattern="[A-Za-z0-9._-]+"></label><label>Archiv<input id="luanti-import-file" type="file" accept=".tar.gz,.tgz,.tar,.zip" required></label><button class="button button-primary" type="submit">Nahrát a importovat</button></form><div id="luanti-backups-list" class="luanti-list section-gap"></div></article>
+        <article class="card section-gap"><div class="card-heading"><div><h2>Hráči v aktivním světě</h2><p class="muted">Zobrazuje auth záznamy včetně offline hráčů; online přítomnost ani inventář se zatím neupravují.</p></div><button id="luanti-players-refresh" class="button button-quiet" type="button">Obnovit hráče</button></div><div class="notice notice-warn">Přidání vytváří auth záznam bez hesla. Před veřejným spuštěním nastavte hráči heslo přímo v Luanti. Odebrání smaže auth/oprávnění, ale ponechá poziční a inventářová data světa pro obnovu. Úprava údajů a inventářů je budoucí rozšíření.</div><form id="luanti-player-form" class="luanti-inline-form"><label>Nový hráč<input id="luanti-player-name" required maxlength="20" pattern="[A-Za-z0-9_-]{1,20}" autocomplete="off"></label><button class="button button-primary" type="submit">Přidat bez hesla</button></form><div id="luanti-players-note" class="muted section-gap">Načítám auth databázi…</div><div id="luanti-players-list" class="luanti-list"></div></article>
+        <article id="luanti-readme-card" class="card section-gap" hidden><div class="card-heading"><div><h2 id="luanti-readme-title">README</h2><p class="muted" id="luanti-readme-meta"></p></div><button id="luanti-readme-close" class="button button-quiet" type="button">Zavřít</button></div><div id="luanti-readme-body" class="luanti-readme"></div></article>
       </section>
 
       <section class="view" id="view-environment">

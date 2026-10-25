@@ -44,7 +44,7 @@ jobs:
 
       - name: Run checks and tests
         run: |
-          python3 -m py_compile ffp/ffp/bin/ffp-webui ffp/ffp/bin/ffp_webui_rclone.py
+          python3 -m py_compile ffp/ffp/bin/ffp-webui ffp/ffp/bin/ffp_webui_rclone.py ffp/ffp/bin/ffp_webui_luanti.py
           python3 -m unittest discover -s tests -v
           node --check internal/webui/assets/app.js
           sh -n build.sh ffp/ffp/start/ffp-webui.sh
