@@ -60,7 +60,7 @@ class LuantiManagerTests(unittest.TestCase):
             'worlds_path': '/ffp/home/root/.minetest/worlds',
             'mods_path': '/ffp/home/root/.minetest/mods',
             'skins_path': '/ffp/home/root/.minetest/skins',
-            'user_path': '/ffp/home/root/.minetest/data',
+            'user_path': '/ffp/home/root/.minetest',
         }
         self.assertEqual({key: manager.preferences[key] for key in expected}, expected)
 
@@ -87,11 +87,31 @@ class LuantiManagerTests(unittest.TestCase):
             'worlds_path': '/ffp/home/root/.minetest/worlds',
             'mods_path': '/ffp/home/root/.minetest/mods',
             'skins_path': '/ffp/home/root/.minetest/skins',
-            'user_path': '/ffp/home/root/.minetest/data',
+            'user_path': '/ffp/home/root/.minetest',
         }
         self.assertEqual({key: manager.preferences[key] for key in expected}, expected)
         self.assertEqual(manager.preferences['selected_world'], '')
         self.assertEqual(manager.preferences['run_as_user'], '')
+
+    def test_previous_data_subdirectory_default_migrates_to_minetest_root(self):
+        preferences = self.root / 'previous-defaults.json'
+        preferences.write_text(json.dumps({
+            'path_defaults_version': 2,
+            'binary_path': '/ffp/bin/luantiserver',
+            'config_path': '/ffp/etc/luanti/minetest.conf',
+            'games_path': '/ffp/home/root/.minetest/games',
+            'worlds_path': '/ffp/home/root/.minetest/worlds',
+            'mods_path': '/ffp/home/root/.minetest/mods',
+            'skins_path': '/ffp/home/root/.minetest/skins',
+            'user_path': '/ffp/home/root/.minetest/data',
+        }), encoding='utf-8')
+        manager = LuantiManager(
+            state_root=str(self.root / 'previous-defaults-state'),
+            preferences_path=str(preferences),
+            find_binary=None,
+        )
+        self.assertEqual(manager.preferences['user_path'], '/ffp/home/root/.minetest')
+        self.assertEqual(manager.preferences['path_defaults_version'], 3)
 
     def test_paths_can_be_saved_without_world_or_service_account(self):
         preferences = self.root / 'path-only' / 'luanti.json'
@@ -198,6 +218,7 @@ class LuantiManagerTests(unittest.TestCase):
         )
         self.assertEqual(manager.preferences['games_path'], custom_games)
         self.assertEqual(manager.preferences['worlds_path'], '/ffp/home/root/.minetest/worlds')
+        self.assertEqual(manager.preferences['user_path'], '/ffp/var/luanti/user')
 
     def test_symlinked_home_paths_are_allowed_but_internal_state_aliases_are_not(self):
         home_target = self.root / 'home-target'
@@ -211,6 +232,14 @@ class LuantiManagerTests(unittest.TestCase):
         state_alias.symlink_to(self.manager.state_root, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'internal state'):
             self.manager.validate_path(str(state_alias / 'luanti' / 'outside'))
+
+    def test_create_world_never_overwrites_existing_world(self):
+        world = self.paths['worlds_path'] / 'main'
+        sentinel = world / 'preserve-me.txt'
+        sentinel.write_text('existing world data', encoding='utf-8')
+        with self.assertRaises(FileExistsError):
+            self.manager.create_world('main', 'default')
+        self.assertEqual(sentinel.read_text(encoding='utf-8'), 'existing world data')
 
     def set_auth_file(self, rows=''):
         world = self.paths['worlds_path'] / 'main'
@@ -285,6 +314,19 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertFalse((self.paths['mods_path'] / 'evil').exists())
         self.assertFalse((self.root / 'escaped').exists())
 
+    def test_import_never_overwrites_an_existing_world(self):
+        archive = self.root / 'world-import.tar.gz'
+        payload = self.root / 'incoming-world'
+        payload.mkdir()
+        (payload / 'world.mt').write_text('gameid = default\n', encoding='utf-8')
+        with tarfile.open(archive, 'w:gz') as tar:
+            tar.add(payload, arcname='main')
+        sentinel = self.paths['worlds_path'] / 'main' / 'preserve-me.txt'
+        sentinel.write_text('existing world data', encoding='utf-8')
+        with self.assertRaises(FileExistsError):
+            self.manager.import_archive('worlds', 'main', str(archive))
+        self.assertEqual(sentinel.read_text(encoding='utf-8'), 'existing world data')
+
     def test_readme_is_plain_text_and_accepts_legacy_typo_filename(self):
         game = self.paths['games_path'] / 'default'
         (game / 'REDADME.md').write_text('# title\n<script>alert(1)</script>\n', encoding='utf-8')
@@ -328,6 +370,20 @@ class LuantiManagerTests(unittest.TestCase):
         self.manager.update_paths({'selected_world': ''})
         self.assertIsNone(self.manager.mod_enabled('example'))
         self.assertIsNone(self.manager.list_category('mods')[0]['enabled'])
+
+    def test_list_mods_reads_selected_world_configuration_once(self):
+        for name in ('example', 'another'):
+            mod_path = self.paths['mods_path'] / name
+            mod_path.mkdir()
+            (mod_path / 'mod.conf').write_text('name = %s\n' % name, encoding='utf-8')
+        (self.paths['worlds_path'] / 'main' / 'world.mt').write_text(
+            'gameid = default\nload_mod_example = true\n', encoding='utf-8')
+        with mock.patch.object(self.manager, '_world_conf', wraps=self.manager._world_conf) as world_conf:
+            listed = self.manager.list_category('mods')
+        self.assertEqual(world_conf.call_count, 1)
+        enabled = {item['name']: item['enabled'] for item in listed}
+        self.assertTrue(enabled['example'])
+        self.assertFalse(enabled['another'])
 
     def test_reported_nas_layout_uses_minetest_game_folder_for_minetest_id(self):
         default_game = self.paths['games_path'] / 'default'
@@ -410,6 +466,8 @@ class LuantiManagerTests(unittest.TestCase):
         self.assertEqual(result['world'], 'main')
         self.assertEqual(popen.call_args.args[0][popen.call_args.args[0].index('--world') + 1],
                          str(self.paths['worlds_path'] / 'main'))
+        self.assertEqual(popen.call_args.kwargs['env']['LUANTI_USER_PATH'], str(self.paths['user_path']))
+        self.assertEqual(popen.call_args.kwargs['cwd'], str(self.paths['user_path']))
         setgroups.assert_called_once_with([0])
         setgid.assert_called_once_with(0)
         setuid.assert_called_once_with(0)

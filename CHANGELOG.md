@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.3 — 2026-10-26
+
+- ADB obrazovka nyní podporuje fullscreen na celé kartě, včetně dostupného ovládání při zobrazení přes celou obrazovku.
+- Přidáno best-effort tlačítko klávesnice: otevření znovu klepne na poslední zvolené místo, skrytí odešle Zpět a může provést navigaci, pokud klávesnice vidět není.
+- Přidány hardwarové klávesy pro power/uzamknutí a hlasitost nahoru/dolů, směrové swipe šipky a gesto stažení Rychlého nastavení z horního okraje.
+- Rozšířeny ADB regresní testy o pevnou mapu keycodů, UI klávesnice, fullscreen ovládání a směrová gesta.
+
+## 0.12.2 — 2026-10-26
+
+- Výchozí cesta uživatelských dat Luanti nyní míří na `/ffp/home/root/.minetest`; předchozí automatický default `.minetest/data` se migruje na kořen jen při standardním rozložení přímých podsložek. Vlastní cesty se zachovají a překryvy se dál odmítají.
+- Výpis modů načte konfiguraci vybraného světa jednou pro celý seznam; stav jednotlivých modů zůstává odvozený z `load_mod_<název>`.
+- Přidány regrese pro bezpečnou migraci cest, zachování vlastních umístění, jednorázové načtení `world.mt` a odmítnutí přepsání existujícího světa při vytvoření či importu.
+
 ## 0.12.1 — 2026-10-26
 
 - Ve všech kartách jsou potvrzení akcí sjednocena do přístupného dialogu s tlačítky Zrušit a pojmenovaným potvrzením. Nahrazeno je i všech 42 bran vyžadujících opsání slova či fráze; běžné vstupní prompty zůstávají.

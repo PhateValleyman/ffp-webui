@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPSConnection
 
-WEBUI_VERSION = '0.12.1'
+WEBUI_VERSION = '0.12.3'
 DEFAULT_CONFIG = '/ffp/etc/ffp-webui/config.json'
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 ASSET_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'share', 'ffp-webui', 'assets'))
@@ -796,7 +796,11 @@ def validate_adb_remote_path(value):
 ADB_SCREEN_MAX_BYTES = 16 * 1024 * 1024
 ADB_SCREEN_MAX_DIMENSION = 16384
 ADB_SCREEN_MAX_PIXELS = 33554432
-ADB_SCREEN_KEYCODES = {'back': 'KEYCODE_BACK', 'home': 'KEYCODE_HOME', 'recent': 'KEYCODE_APP_SWITCH'}
+ADB_SCREEN_KEYCODES = {
+    'back': 'KEYCODE_BACK', 'home': 'KEYCODE_HOME', 'recent': 'KEYCODE_APP_SWITCH',
+    'lock': 'KEYCODE_POWER', 'volume_up': 'KEYCODE_VOLUME_UP',
+    'volume_down': 'KEYCODE_VOLUME_DOWN',
+}
 def validate_adb_screen_coordinate(value):
     if type(value) is not int or value < 0 or value >= ADB_SCREEN_MAX_DIMENSION:
         raise ValueError('Screen coordinates must be integers from 0 to 16383')

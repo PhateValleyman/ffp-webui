@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DIST="$ROOT/dist"
-VERSION=${VERSION:-0.12.1}
+VERSION=${VERSION:-0.12.3}
 STAGE="$DIST/stage-$VERSION"
 
 case "$VERSION" in

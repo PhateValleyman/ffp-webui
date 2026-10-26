@@ -15,5 +15,5 @@
 
 ## Security and target limitations
 
-- This WebUI runs with root-level administrative capabilities and has no login. Luanti games/mods can execute code; the manager therefore refuses to run the server as root and only allows an existing non-root account outside the root group. It does not create or alter OS accounts. The selected account must be able to read games/mods/config and write the selected world and user-data directory.
+- This WebUI runs with root-level administrative capabilities and has no login. Luanti games/mods can execute code; only use trusted game and mod code. The manager permits an existing account including `root`, drops to the selected UID/GID and supplementary groups for the server process, and does not create or alter OS accounts. The selected account must be able to read games/mods/config and write the selected world and user-data directory.
 - The repository's NAS profile targets a Zyxel NSA320 with FFP 0.7.0, Linux 2.6.31.8, ARMv5 soft-float, and static Python 3.13.16. The installed Luanti binary/version, SQLite auth schema on that device, and presence of an eligible non-root service account are not verified here. Build and host tests cannot substitute for a test start on that NAS.

@@ -10,7 +10,7 @@ let editingUser = null;
 let passwordUser = '';
 let luantiSnapshot = null;
 let toastTimer;
-const FRONTEND_VERSION = '0.12.1';
+const FRONTEND_VERSION = '0.12.3';
 let backendVersion = '';
 
 const themeToggle = $('#theme-toggle');
@@ -3077,13 +3077,21 @@ let adbScreenGeneration = 0;
 let adbScreenRequestInFlight = false;
 let adbScreenObjectUrl = '';
 let adbScreenPointer = null;
+let adbScreenLastTap = null;
+// Tracks the last requested action, not actual IME visibility (ADB cannot report it reliably).
+let adbScreenKeyboardRequestedVisible = false;
 const ADB_SCREEN_POLL_MS = 1000;
 function updateAdbScreenControls() {
   const selected = $('#adb-screen-device').value;
   $('#adb-screen-device').disabled = !adbScreenAvailable || adbScreenActive;
   $('#adb-screen-start').disabled = !adbScreenAvailable || adbScreenActive || !selected;
   $('#adb-screen-stop').disabled = !adbScreenActive;
-  $$('[data-adb-screen-key]').forEach(button => { button.disabled = !adbScreenActive; });
+  $('#adb-screen-fullscreen').disabled = !adbScreenActive;
+  $$('[data-adb-screen-key], [data-adb-screen-swipe]').forEach(button => { button.disabled = !adbScreenActive; });
+  const keyboardButton = $('#adb-screen-keyboard');
+  keyboardButton.disabled = !adbScreenActive || !adbScreenLastTap;
+  keyboardButton.textContent = adbScreenKeyboardRequestedVisible ? 'Zkusit skrýt (Zpět)' : 'Zkusit zobrazit klávesnici';
+  keyboardButton.setAttribute('aria-pressed', String(adbScreenKeyboardRequestedVisible));
   $('#adb-screen-text').disabled = !adbScreenActive;
   $('#adb-screen-text-form button').disabled = !adbScreenActive;
 }
@@ -3110,6 +3118,8 @@ function stopAdbScreen(clearFrame = false) {
   if (adbScreenTimer) clearTimeout(adbScreenTimer);
   adbScreenTimer = null;
   adbScreenPointer = null;
+  adbScreenLastTap = null;
+  adbScreenKeyboardRequestedVisible = false;
   updateAdbScreenControls();
   if (wasActive) {
     $('#adb-screen-note').className = 'notice notice-info';
@@ -3206,14 +3216,72 @@ async function sendAdbScreenInput(payload) {
     return false;
   }
 }
+async function toggleAdbScreenKeyboard() {
+  if (!adbScreenActive) return;
+  if (adbScreenKeyboardRequestedVisible) {
+    if (await sendAdbScreenInput({ action: 'key', key: 'back' })) {
+      adbScreenKeyboardRequestedVisible = false;
+      updateAdbScreenControls();
+    }
+    return;
+  }
+  if (!adbScreenLastTap) return toast('Nejdříve klepněte na textové pole na obrazovce zařízení.', true);
+  if (await sendAdbScreenInput({ action: 'tap', x: adbScreenLastTap.x, y: adbScreenLastTap.y })) {
+    adbScreenKeyboardRequestedVisible = true;
+    updateAdbScreenControls();
+  }
+}
+async function toggleAdbScreenFullscreen() {
+  const card = $('#adb-screen-card');
+  try {
+    if (document.fullscreenElement === card) await document.exitFullscreen();
+    else if (card.requestFullscreen) await card.requestFullscreen();
+    else throw new Error('Tento prohlížeč nepodporuje režim celé obrazovky.');
+  } catch (error) {
+    toast(`Režim celé obrazovky se nepodařilo změnit: ${error.message}`, true);
+  }
+}
+function updateAdbScreenFullscreen() {
+  const button = $('#adb-screen-fullscreen');
+  const fullscreen = document.fullscreenElement === $('#adb-screen-card');
+  button.textContent = fullscreen ? 'Ukončit celou obrazovku' : 'Celá obrazovka';
+  button.setAttribute('aria-pressed', fullscreen ? 'true' : 'false');
+}
+async function sendAdbScreenSwipe(direction) {
+  const image = $('#adb-screen-image');
+  if (!adbScreenActive || !image.naturalWidth || !image.naturalHeight) return;
+  const maxX = image.naturalWidth - 1;
+  const maxY = image.naturalHeight - 1;
+  const midX = Math.round(maxX / 2);
+  const midY = Math.round(maxY / 2);
+  const left = Math.round(maxX * 0.2);
+  const right = Math.round(maxX * 0.8);
+  const top = Math.round(maxY * 0.2);
+  const bottom = Math.round(maxY * 0.8);
+  const gestures = {
+    up: [midX, bottom, midX, top],
+    down: [midX, top, midX, bottom],
+    left: [right, midY, left, midY],
+    right: [left, midY, right, midY],
+    quick_settings: [midX, 0, midX, Math.round(maxY * 0.82)]
+  };
+  const points = gestures[direction];
+  if (!points) return;
+  await sendAdbScreenInput({ action: 'swipe', x1: points[0], y1: points[1], x2: points[2], y2: points[3], duration_ms: direction === 'quick_settings' ? 450 : 350 });
+}
 $('#adb-screen-start').addEventListener('click', startAdbScreen);
 $('#adb-screen-stop').addEventListener('click', () => stopAdbScreen());
+$('#adb-screen-fullscreen').addEventListener('click', toggleAdbScreenFullscreen);
+$('#adb-screen-keyboard').addEventListener('click', toggleAdbScreenKeyboard);
+document.addEventListener('fullscreenchange', updateAdbScreenFullscreen);
+updateAdbScreenFullscreen();
 $('#adb-screen-device').addEventListener('change', () => {
   if (adbScreenActive) stopAdbScreen();
   adbScreenSerial = $('#adb-screen-device').value;
   updateAdbScreenControls();
 });
 $$('[data-adb-screen-key]').forEach(button => button.addEventListener('click', () => sendAdbScreenInput({ action: 'key', key: button.dataset.adbScreenKey })));
+$$('[data-adb-screen-swipe]').forEach(button => button.addEventListener('click', () => sendAdbScreenSwipe(button.dataset.adbScreenSwipe)));
 $('#adb-screen-text-form').addEventListener('submit', async event => {
   event.preventDefault();
   const input = $('#adb-screen-text');
@@ -3240,8 +3308,14 @@ $('#adb-screen-image').addEventListener('pointerup', event => {
   const from = point(start.x, start.y);
   const to = point(event.clientX, event.clientY);
   if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 8) {
+    adbScreenLastTap = to;
+    adbScreenKeyboardRequestedVisible = false;
+    updateAdbScreenControls();
     sendAdbScreenInput({ action: 'tap', x: to.x, y: to.y });
   } else {
+    adbScreenLastTap = null;
+    adbScreenKeyboardRequestedVisible = false;
+    updateAdbScreenControls();
     sendAdbScreenInput({ action: 'swipe', x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration_ms: Math.max(80, Math.min(1000, Date.now() - start.started)) });
   }
 });

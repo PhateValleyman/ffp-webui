@@ -1,8 +1,21 @@
-# FFP WebUI 0.12.1 — Zyxel NSA320
+# FFP WebUI 0.12.3 — Zyxel NSA320
 
-České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly. Ve v0.12.0 byla na cílovém NASu pouze read-only ověřena kompatibilita ADB snímání obrazovky; WebUI nebylo aktualizováno a dotykový ani textový vstup nebyl odeslán. Verze v0.12.1 mění pouze potvrzovací rozhraní; na NAS nebyla instalována ani tam neprovedla žádnou změnu.
+České administrační rozhraní pro Zyxel NSA320 s FFP 0.7.0. Cílové zařízení má potvrzený Linux 2.6.31.8, ARMv5TE/armv5tel a 512 MiB RAM. Ověřený Python je 3.13.16 ve statické variantě `/ffp/opt/python-3.13-static/bin/python3.13`; právě tento runtime používá WebUI. Vydání 0.10.0 bylo instalováno, spuštěno a následně vráceno ze zálohy na cílovém NASu; nové Zypkg mutace z 0.11.0 na NASu spuštěny nebyly. Ve v0.12.0 byla na cílovém NASu read-only ověřena kompatibilita ADB snímání obrazovky; WebUI nebylo aktualizováno a dotykový ani textový vstup nebyl odeslán. Opravné v0.12.2 nastavuje výchozí Luanti `user_path` na `/ffp/home/root/.minetest`, bezpečně migruje předchozí automatickou cestu `.minetest/data` jen při standardním rozložení a zrychluje výpis modů; vlastní cesty zůstávají zachované. V0.12.3 rozšiřuje ADB mirror o fullscreen, ovládací gesta, hardwarové klávesy a best-effort ovládání klávesnice Androidu.
 
 **Bezpečnostní upozornění:** WebUI nemá přihlášení a poskytuje správu s oprávněními root. Provozujte jej pouze v důvěryhodné soukromé síti; nevystavujte jej přímo do internetu.
+
+## Novinky v 0.12.3
+
+- ADB náhled lze přepnout do celoobrazovkového režimu; ovládací prvky zůstávají součástí obrazovky a prohlížeč dovoluje návrat klávesou Escape.
+- Ovládání klávesnice je pouze best-effort: po klepnutí na textové pole tlačítko znovu klepne na stejné místo a požádá aplikaci o zobrazení klávesnice. Skrytí posílá **Zpět**, což může při nezobrazené klávesnici provést návrat v aplikaci; ADB neposkytuje univerzální příkaz ani spolehlivý stav její viditelnosti.
+- Přibyla tlačítka pro uzamknutí/probuzení obrazovky (power key) a hlasitost nahoru/dolů. Šipky nahoru, dolů, doleva a doprava odesílají swipe gesta; **Rychlé nastavení** stáhne panel přejetím od horního okraje.
+- Ovládání používá stávající omezené ADB endpointy a validované swipe souřadnice. Snímky jsou nadále načítány přímo z připojeného zařízení; nic se do Androidu neinstaluje ani neukládá.
+
+## Novinky v 0.12.2
+
+- Výchozí `user_path` je nyní `/ffp/home/root/.minetest`, aby Luanti sdílelo jeden očekávaný kořen s existujícími `builtin`, `games`, `worlds`, `mods`, `skins` a `data`. Dřívější výchozí `.minetest/data` se migruje pouze tehdy, když hry, světy, mody a skiny zůstávají v přímých podsložkách; při vlastních cestách se staré umístění zachová a překryvy se odmítnou.
+- Výpis modů načte `world.mt` vybraného světa jednou pro celý seznam místo opakovaného čtení pro každý mod; stav `load_mod_<název>` zůstává stejný.
+- Přidány regrese pro migraci staré výchozí cesty, zachování vlastní cesty, jednorázové načtení konfigurace a odmítnutí přepsání existujícího světa při vytvoření či importu.
 
 ## Novinky v 0.12.1
 
@@ -114,27 +127,29 @@ sh -n build.sh ffp/ffp/start/ffp-webui.sh
 ./build.sh
 ```
 
-Build vytvoří `dist/ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.12.1-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.12.1-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.12.1/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
+Build vytvoří `dist/ffp-webui-0.12.3-python3.13-static-UNVERIFIED.txz` pro `funpkg`, zdrojový archiv `dist/ffp-webui-0.12.3-source.tgz`, SHA-256 manifest `dist/ffp-webui-0.12.3-SHA256SUMS` a rozbalenou ukázku `dist/stage-0.12.3/`. Přípona `.tgz` je jen pro zdroje; FFP instalátor je `.txz`.
 
-Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.12.1](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.12.1) README, instalátor `ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.12.1-source.tgz` a manifest `ffp-webui-0.12.1-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
+Ruční instalace je určena pro offline NAS nebo jako záložní postup. Na počítači s internetem stáhněte z [vydání 0.12.3](https://github.com/PhateValleyman/ffp-webui/releases/tag/v0.12.3) README, instalátor `ffp-webui-0.12.3-python3.13-static-UNVERIFIED.txz`, zdrojový archiv `ffp-webui-0.12.3-source.tgz` a manifest `ffp-webui-0.12.3-SHA256SUMS`; přeneste je ručně do stejné složky na NAS. Pak ověřte kontrolní součty a nainstalujte:
 
 ```sh
 cd /cesta/k/prenesenym-souborum
-sha256sum -c ffp-webui-0.12.1-SHA256SUMS
-funpkg -i ./ffp-webui-0.12.1-python3.13-static-UNVERIFIED.txz
+sha256sum -c ffp-webui-0.12.3-SHA256SUMS
+funpkg -i ./ffp-webui-0.12.3-python3.13-static-UNVERIFIED.txz
 /ffp/start/ffp-webui.sh restart
 ```
 
-Manifest kontroluje instalátor i zdrojový archiv, proto přeneste oba. Před instalací vytvořte zálohu všech souborů vyjmenovaných v aktuálním záznamu `/ffp/funpkg/installed/ffp-webui-*`, všech souborů v `/ffp/etc/ffp-webui/` a odpovídajících záznamů balíčků; WebUI zálohu ani rollback automaticky neprovádí. Po restartu, pokud chcete použít celý adresář jako uživatelskou cestu Luanti, nastavte v kartě Luanti `Cesta k uživatelským datům` na `/ffp/home/root/.minetest` a uložte pouze cesty, až bude server vypnutý; hry, světy, mody a skiny mají zůstat v uvedených přímých podsložkách. Tento balík to umožňuje, ale nastavení NASu nemění automaticky.
+Manifest kontroluje instalátor i zdrojový archiv, proto přeneste oba. Před instalací vytvořte zálohu všech souborů vyjmenovaných v aktuálním záznamu `/ffp/funpkg/installed/ffp-webui-*`, všech souborů v `/ffp/etc/ffp-webui/` a odpovídajících záznamů balíčků; WebUI zálohu ani rollback automaticky neprovádí. Po restartu se předchozí automatická cesta `.minetest/data` přemigruje na `/ffp/home/root/.minetest` jen tehdy, když hry, světy, mody a skiny zůstávají v přímých podsložkách; vlastní cesty jsou zachované. V kartě Luanti ověřte `user_path` i ostatní cesty před startem. Změna nastavení žádné existující světy nepřesouvá ani nemaže.
 
 Na cílovém NASu bylo ověřeno, že `funpkg -u <nový-archiv>` vrací „Not installed“ i při instalované starší verzi (a přitom může skončit návratovým kódem 0). Pro novou verzi proto použijte `funpkg -i`; NAS tím vytvoří další záznam verze a starší záznamy ponechá. Aktualizátor ve WebUI používá `-i` a kontroluje následný výpis `funpkg -q .`, aby se falešný úspěch nezobrazil jako dokončená instalace.
 
 Demo běží ze stage a používá pouze fiktivní data:
 
 ```sh
-python3 dist/stage-0.12.1/ffp/bin/ffp-webui --config dist/stage-0.12.1/ffp/etc/ffp-webui/config.json --demo
+python3 dist/stage-0.12.3/ffp/bin/ffp-webui --config dist/stage-0.12.3/ffp/etc/ffp-webui/config.json --demo
 ```
 
 ## Stav ověření
+
+Verze 0.12.3 prošla 133 Python testy, Go testy, kontrolami syntaxe Pythonu/JavaScriptu/shellu a sestavením s kontrolou SHA-256. Na NSA320 `/api/health` vrátil 200 s verzí `0.12.3`; běžící backend a ADB/HTML/CSS soubory odpovídaly připravenému balíčku. Přes WebUI ADB mirroru na SHIELD Tablet `192.168.1.12:5555` byl pořízen platný PNG snímek 1200×1920. Akce hlasitosti dolů/nahoru a gesta stažení Rychlého nastavení i návratu byla přijata; hlasitost reproduktoru zůstala na 8/15 a po návratu byl v popředí Termux. V živém testu nebyly odeslány klepnutí, text, Zpět ani Power; ovládání klávesnice je best-effort.
 
 Pro v0.12.1 prošlo 127 Python testů, Go testy, kontroly syntaxe Pythonu/JavaScriptu/shellu, build a SHA-256 ověření. Chromium ověřilo dialogy, klávesové ovládání a mobilní šířku nad skutečnými frontendovými soubory ze staged balíku, podávanými lokálním statickým HTTP serverem. Celý demo backend nebylo možné znovu spustit: demo režim má pevný localhost port 8888, který obsazoval již běžící lokální proces; tento proces zůstal nedotčen. Na NSA320 s ADB 1.0.32 byl bez zápisu do Androidu úspěšně získán platný PNG snímek přes `exec-out screencap -p`. Nebyla testována interakce s dotykem/textem a WebUI v0.12.0 nebylo na NAS instalováno. Dřívější read-only `zy-pkgs query` příkazy na NSA320 byly ověřeny; během vývoje v0.11.0 nebyla spuštěna žádná Zypkg instalace, aktualizace, změna stavu ani odebrání. Historický test v0.10.0 instaloval pouze FFP-WebUI, potvrdil health endpoint a po ověřené záloze vrátil NAS na v0.9.4; původní konfigurace zůstaly zachované. Živý aktualizátor dříve načetl GitHub Releases API a ověřil SHA-256 staženého v0.9.5 bez instalace. Před spuštěním Luanti ověřte kompatibilní serverovou binárku, modul `sqlite3` statického Pythonu a přístup ke zvoleným cestám.

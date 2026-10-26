@@ -23,7 +23,7 @@ NAME_RE = re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 PLAYER_RE = re.compile(r'^[A-Za-z0-9_-]{1,20}$')
 CONF_KEY_RE = re.compile(r'^[A-Za-z0-9_.]+$')
 SECRET_KEY_RE = re.compile(r'(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)', re.I)
-PATH_DEFAULTS_VERSION = 2
+PATH_DEFAULTS_VERSION = 3
 SCREENSHOT_PATH_DEFAULTS = {
     'binary_path': '/ffp/bin/luantiserver',
     'config_path': '/ffp/etc/luanti/minetest.conf',
@@ -31,7 +31,7 @@ SCREENSHOT_PATH_DEFAULTS = {
     'worlds_path': '/ffp/home/root/.minetest/worlds',
     'mods_path': '/ffp/home/root/.minetest/mods',
     'skins_path': '/ffp/home/root/.minetest/skins',
-    'user_path': '/ffp/home/root/.minetest/data',
+    'user_path': '/ffp/home/root/.minetest',
 }
 LEGACY_PATH_DEFAULTS = {
     'binary_path': ('/ffp/bin/luantiserver', '/ffp/bin/minetestserver', '/ffp/bin/luanti', '/ffp/bin/minetest'),
@@ -40,7 +40,7 @@ LEGACY_PATH_DEFAULTS = {
     'worlds_path': ('/ffp/var/luanti/worlds', '/ffp/var/minetest/worlds', '/ffp/worlds'),
     'mods_path': ('/ffp/share/luanti/mods', '/ffp/share/minetest/mods', '/ffp/mods'),
     'skins_path': ('/ffp/share/luanti/skins', '/ffp/share/minetest/skins', '/ffp/skins'),
-    'user_path': ('/ffp/var/luanti/user', '/ffp/var/minetest/user'),
+    'user_path': ('/ffp/home/root/.minetest/data', '/ffp/var/luanti/user', '/ffp/var/minetest/user'),
 }
 CATEGORY_FIELDS = {
     'games': 'games_path',
@@ -183,9 +183,14 @@ class LuantiManager(object):
             merged.update(supplied)
             stored_path_version = supplied.get('path_defaults_version', 0)
             if not isinstance(stored_path_version, int) or stored_path_version < PATH_DEFAULTS_VERSION:
+                migrated_user_path = False
                 for field, legacy_values in LEGACY_PATH_DEFAULTS.items():
                     if supplied.get(field) in legacy_values:
                         merged[field] = self.preferences[field]
+                        if field == 'user_path':
+                            migrated_user_path = True
+                if migrated_user_path and not self._supports_minetest_user_root(merged):
+                    merged['user_path'] = supplied['user_path']
                 merged['path_defaults_version'] = PATH_DEFAULTS_VERSION
             self.preferences = self._validate_preferences(merged)
         except (OSError, ValueError, TypeError):
@@ -499,6 +504,13 @@ class LuantiManager(object):
         except OSError:
             return []
         result = []
+        mod_config = None
+        if category == 'mods' and self.preferences.get('selected_world'):
+            try:
+                _world_path, _conf_path, text = self._world_conf(self.preferences['selected_world'])
+                mod_config = parse_conf(text)
+            except (OSError, ValueError):
+                pass
         for name in names:
             if not valid_name(name):
                 continue
@@ -531,7 +543,7 @@ class LuantiManager(object):
                             entry['title'] = name
                     elif category == 'mods':
                         entry['title'] = self.mod_title(name) or name
-                        entry['enabled'] = self.mod_enabled(name)
+                        entry['enabled'] = self._mod_enabled_from_values(name, mod_config)
                 result.append(entry)
             except OSError:
                 continue
@@ -643,7 +655,13 @@ class LuantiManager(object):
             _world_path, _conf_path, text = self._world_conf(world_name)
         except (OSError, ValueError):
             return None
-        value = parse_conf(text).get('load_mod_' + mod_name)
+        return self._mod_enabled_from_values(mod_name, parse_conf(text))
+
+    @staticmethod
+    def _mod_enabled_from_values(mod_name, values):
+        if values is None:
+            return None
+        value = values.get('load_mod_' + mod_name)
         if value is None:
             return False
         return value.strip().lower() not in ('', 'false', '0', 'no', 'off')

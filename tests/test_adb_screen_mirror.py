@@ -150,6 +150,21 @@ class AdbScreenInputTests(unittest.TestCase):
         run.assert_not_called()
         self.assertEqual(handler.status, 400)
 
+    def test_lock_and_volume_buttons_use_fixed_android_keycodes(self):
+        expected = {
+            'lock': 'KEYCODE_POWER',
+            'volume_up': 'KEYCODE_VOLUME_UP',
+            'volume_down': 'KEYCODE_VOLUME_DOWN',
+        }
+        for key, keycode in expected.items():
+            with self.subTest(key=key):
+                self.assertEqual(FFP.ADB_SCREEN_KEYCODES[key], keycode)
+                handler = self.make_handler({'serial': SERIAL, 'action': 'key', 'key': key})
+                with mock.patch.object(FFP, 'run_fixed') as run:
+                    FFP.Handler.adb_screen_input(handler)
+                run.assert_called_once_with(['/ffp/bin/adb', '-s', SERIAL, 'shell', 'input keyevent ' + keycode], 8)
+                self.assertEqual(handler.status, 200)
+
     def test_text_spaces_are_encoded_and_shell_metacharacters_quoted(self):
         handler = self.make_handler({'serial': SERIAL, 'action': 'text', 'text': 'hello world; echo nope'})
         with mock.patch.object(FFP, 'run_fixed') as run:
@@ -189,18 +204,38 @@ class AdbScreenFrontendContractTests(unittest.TestCase):
             cls.html = handle.read()
         with open(os.path.join(ROOT, 'internal', 'webui', 'assets', 'app.js'), encoding='utf-8') as handle:
             cls.js = handle.read()
+        with open(os.path.join(ROOT, 'internal', 'webui', 'assets', 'style.css'), encoding='utf-8') as handle:
+            cls.css = handle.read()
         with open(SCRIPT, encoding='utf-8') as handle:
             cls.backend = handle.read()
 
     def test_ui_exposes_stream_control_navigation_and_text(self):
-        for item in ('adb-screen-device', 'adb-screen-start', 'adb-screen-stop', 'adb-screen-image', 'adb-screen-text-form'):
+        for item in ('adb-screen-card', 'adb-screen-device', 'adb-screen-start', 'adb-screen-stop', 'adb-screen-fullscreen', 'adb-screen-keyboard', 'adb-screen-image', 'adb-screen-text-form'):
             with self.subTest(item=item):
                 self.assertIn('id="%s"' % item, self.html)
         for action in ("action: 'tap'", "action: 'swipe'", "action: 'key'", "action: 'text'"):
             with self.subTest(action=action):
                 self.assertIn(action, self.js)
+        for direction in ('up', 'down', 'left', 'right', 'quick_settings'):
+            with self.subTest(direction=direction):
+                self.assertIn('data-adb-screen-swipe="%s"' % direction, self.html)
+        self.assertIn('requestFullscreen()', self.js)
+        self.assertIn("fullscreenchange", self.js)
+        self.assertIn("quick_settings: [midX, 0, midX, Math.round(maxY * 0.82)]", self.js)
         self.assertIn('document.hidden', self.js)
         self.assertIn("if (name !== 'adb') stopAdbScreen()", self.js)
+
+    def test_keyboard_toggle_reuses_last_tap_and_uses_back_to_hide(self):
+        self.assertIn("function toggleAdbScreenKeyboard()", self.js)
+        self.assertIn("key: 'back'", self.js)
+        self.assertIn("adbScreenLastTap.x", self.js)
+        self.assertIn("adbScreenLastTap = to", self.js)
+        self.assertIn("Zkusit skrýt (Zpět)", self.js)
+        self.assertIn("keyboardButton.setAttribute('aria-pressed'", self.js)
+        self.assertIn('nikoli ověřený stav klávesnice', self.html)
+        self.assertIn('adb-screen-card:fullscreen .adb-screen-actions', self.css)
+        self.assertIn('adb-screen-card:fullscreen .adb-screen-stage', self.css)
+        self.assertIn('adb-screen-card:fullscreen .adb-screen-controls', self.css)
 
     def test_routes_and_blob_csp_are_present(self):
         self.assertIn("path == '/api/adb/screen' and self.command == 'GET'", self.backend)

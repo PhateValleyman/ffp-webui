@@ -133,11 +133,11 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('id="action-confirm-accept"', dialog)
 
     def test_release_version_is_consistent_across_backend_frontend_and_build(self):
-        self.assertIn("WEBUI_VERSION = '0.12.1'", self.backend)
-        self.assertIn("FRONTEND_VERSION = '0.12.1'", self.js)
-        self.assertIn('WebUI 0.12.1 · Python', self.html)
+        self.assertIn("WEBUI_VERSION = '0.12.3'", self.backend)
+        self.assertIn("FRONTEND_VERSION = '0.12.3'", self.js)
+        self.assertIn('WebUI 0.12.3 · Python', self.html)
         with open(os.path.join(ROOT, 'build.sh'), encoding='utf-8') as handle:
-            self.assertIn('VERSION=${VERSION:-0.12.1}', handle.read())
+            self.assertIn('VERSION=${VERSION:-0.12.3}', handle.read())
 
     def test_github_update_stages_only_ffp_webui_and_manual_install_is_in_browser(self):
         for endpoint in ('/api/self-update', '/api/self-update/check', '/api/self-update/install'):
